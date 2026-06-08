@@ -1,0 +1,1922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Inside the Machine — An LLM Field Experience</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&family=Sora:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+:root{
+  --bg:#06070d;--bg-2:#0b0d18;--ink:#f4f1ea;--muted:#9aa0b8;--soft:#6b7090;
+  --line:rgba(255,255,255,.08);--line-2:rgba(255,255,255,.14);
+  --amber:#ffb347;--amber-2:#ff8c42;--cyan:#5eead4;--violet:#a78bfa;
+  --pink:#f472b6;--lime:#bef264;--blue:#60a5fa;
+  --glass:rgba(18,20,34,.66);--glass-2:rgba(24,27,46,.82);
+}
+body{font-family:'Sora',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6;overflow-x:hidden;position:relative;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;line-height:1.04;letter-spacing:-.025em;font-weight:600}
+.serif{font-family:'Instrument Serif',Georgia,serif;font-weight:400;font-style:italic;letter-spacing:0}
+code,.mono{font-family:'JetBrains Mono',monospace}
+
+#bg-canvas{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:0;pointer-events:none}
+body::before{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;background:radial-gradient(ellipse 90% 70% at 35% 45%,rgba(6,7,13,.72),rgba(6,7,13,.42) 55%,rgba(6,7,13,.15) 100%)}
+body::after{content:"";position:fixed;inset:0;z-index:2;pointer-events:none;opacity:.04;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+#loader{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;transition:opacity .8s ease,visibility .8s ease}
+#loader.done{opacity:0;visibility:hidden}
+.loader-ring{width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,.1);border-top-color:var(--amber);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loader-text{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--soft)}
+.loader-text b{color:var(--amber);font-weight:500}
+
+#progress-rail{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--amber),var(--pink),var(--cyan));z-index:200;width:0%;box-shadow:0 0 18px rgba(255,179,71,.6);transition:width .1s linear}
+
+nav{position:fixed;top:18px;left:50%;transform:translateX(-50%);background:var(--glass);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line-2);border-radius:100px;padding:6px;z-index:150;display:flex;gap:2px;max-width:94vw;overflow-x:auto;scrollbar-width:none;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+nav::-webkit-scrollbar{display:none}
+nav a{font-family:'Space Grotesk',sans-serif;font-size:12.5px;font-weight:500;color:var(--muted);text-decoration:none;padding:8px 14px;border-radius:100px;white-space:nowrap;transition:all .25s cubic-bezier(.4,0,.2,1);letter-spacing:-.01em}
+nav a:hover,nav a.active{background:var(--ink);color:var(--bg)}
+
+#sound-toggle{position:fixed;bottom:24px;right:24px;z-index:150;width:48px;height:48px;border-radius:50%;background:var(--glass-2);border:1px solid var(--line-2);backdrop-filter:blur(20px);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .3s ease}
+#sound-toggle:hover{border-color:var(--amber);transform:scale(1.08)}
+#sound-toggle .bars{display:flex;gap:2px;align-items:flex-end;height:16px}
+#sound-toggle .bars span{width:2.5px;background:var(--amber);border-radius:2px;animation:soundbar 1s ease-in-out infinite}
+#sound-toggle.muted .bars span{animation-play-state:paused;height:4px!important;background:var(--soft)}
+#sound-toggle .bars span:nth-child(1){height:6px;animation-delay:0s}
+#sound-toggle .bars span:nth-child(2){height:14px;animation-delay:.2s}
+#sound-toggle .bars span:nth-child(3){height:9px;animation-delay:.4s}
+#sound-toggle .bars span:nth-child(4){height:12px;animation-delay:.1s}
+@keyframes soundbar{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+
+section{position:relative;z-index:5;padding:140px 32px;max-width:1180px;margin:0 auto}
+@media(max-width:760px){section{padding:90px 20px}}
+.eyebrow{display:inline-flex;align-items:center;gap:12px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:var(--amber);margin-bottom:24px}
+.eyebrow::before{content:"";width:28px;height:1px;background:var(--amber);opacity:.7}
+.title{font-size:clamp(34px,5.6vw,72px);font-weight:600;margin-bottom:22px;letter-spacing:-.03em;line-height:1.02}
+.title .serif{color:var(--amber)}
+.lead{font-size:clamp(16px,1.9vw,20px);color:var(--muted);max-width:720px;margin-bottom:56px;line-height:1.6;font-weight:300}
+.lead strong{color:var(--ink);font-weight:600}
+.lead .hl{color:var(--cyan);font-weight:400}
+
+.reveal{opacity:0;transform:translateY(40px);transition:opacity 1s cubic-bezier(.16,1,.3,1),transform 1s cubic-bezier(.16,1,.3,1)}
+.reveal.in{opacity:1;transform:none}
+.reveal.d1{transition-delay:.08s}.reveal.d2{transition-delay:.16s}.reveal.d3{transition-delay:.24s}.reveal.d4{transition-delay:.32s}
+
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:120px 32px;max-width:100%}
+.hero-kicker{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--amber);margin-bottom:36px;opacity:0;animation:fadeUp 1s .2s ease forwards}
+.hero h1{font-size:clamp(44px,9vw,140px);font-weight:700;letter-spacing:-.05em;line-height:.92;margin-bottom:34px}
+.hero h1 .l{display:block;opacity:0;transform:translateY(30px) rotateX(40deg);transform-origin:bottom;animation:heroLine 1.1s cubic-bezier(.16,1,.3,1) forwards}
+.hero h1 .l:nth-child(1){animation-delay:.35s}
+.hero h1 .l:nth-child(2){animation-delay:.5s}
+.hero h1 .serif{color:var(--amber)}
+@keyframes heroLine{to{opacity:1;transform:none}}
+@keyframes fadeUp{to{opacity:1;transform:none}}
+.hero-sub{font-size:clamp(16px,2vw,21px);color:var(--muted);max-width:600px;line-height:1.55;font-weight:300;opacity:0;animation:fadeUp 1s .8s ease forwards}
+.hero-sub b{color:var(--ink);font-weight:600}
+.scroll-cue{margin-top:72px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--soft);display:flex;flex-direction:column;align-items:center;gap:14px;opacity:0;animation:fadeUp 1s 1.1s ease forwards}
+.scroll-cue .v{width:1px;height:50px;background:linear-gradient(180deg,var(--soft),transparent);animation:scrollLine 2s ease-in-out infinite}
+@keyframes scrollLine{0%{transform:scaleY(0);transform-origin:top}50%{transform:scaleY(1);transform-origin:top}51%{transform:scaleY(1);transform-origin:bottom}100%{transform:scaleY(0);transform-origin:bottom}}
+.hero-badges{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:40px;opacity:0;animation:fadeUp 1s 1s ease forwards}
+.hero-badge{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.05em;color:var(--muted);padding:7px 14px;border-radius:100px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(10px)}
+.hero-badge b{color:var(--amber)}
+
+.glass{background:var(--glass);backdrop-filter:blur(20px) saturate(1.3);-webkit-backdrop-filter:blur(20px) saturate(1.3);border:1px solid var(--line-2);border-radius:24px;position:relative;overflow:hidden}
+.glass-pad{padding:36px}
+@media(max-width:600px){.glass-pad{padding:24px}}
+
+.handson{position:relative;background:linear-gradient(135deg,rgba(255,140,66,.14),rgba(244,114,182,.08));border:1px solid rgba(255,179,71,.4);border-radius:24px;padding:32px 34px;margin:40px 0;overflow:hidden}
+.handson::before{content:"";position:absolute;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle at 0% 0%,rgba(255,179,71,.18),transparent 50%);pointer-events:none}
+.handson .ho-tag{display:inline-flex;align-items:center;gap:9px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);margin-bottom:14px}
+.handson .ho-tag .hand{font-size:16px;animation:wave 2.2s ease-in-out infinite;transform-origin:70% 70%;display:inline-block}
+@keyframes wave{0%,60%,100%{transform:rotate(0)}10%,30%{transform:rotate(14deg)}20%{transform:rotate(-8deg)}}
+.handson h3{font-size:22px;margin-bottom:10px;color:var(--ink)}
+.handson p{color:var(--muted);font-size:15px;font-weight:300;margin-bottom:8px}
+.handson .ho-steps{list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:10px}
+.handson .ho-steps li{display:flex;gap:12px;align-items:flex-start;font-size:14.5px;color:var(--ink);font-weight:300}
+.handson .ho-steps li .n{flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--amber);color:#1a1206;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.handson .ho-meta{display:inline-flex;gap:8px;align-items:center;margin-top:18px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.05em;flex-wrap:wrap}
+.handson .ho-meta .pill{padding:4px 10px;border-radius:100px;background:rgba(255,255,255,.06);border:1px solid var(--line)}
+
+/* ===== Interactive Lab ===== */
+.lab{position:relative;background:linear-gradient(135deg,rgba(255,140,66,.13),rgba(244,114,182,.07));border:1px solid rgba(255,179,71,.4);border-radius:24px;padding:30px 32px;margin:42px 0;overflow:hidden}
+.lab::before{content:"";position:absolute;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle at 0% 0%,rgba(255,179,71,.16),transparent 48%);pointer-events:none}
+.lab-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;position:relative}
+.lab-tag{display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);margin-bottom:12px}
+.lab-tag .hand{font-size:17px;animation:wave 2.2s ease-in-out infinite;transform-origin:70% 70%;display:inline-block}
+.lab h3{font-size:23px;margin-bottom:8px;color:var(--ink)}
+.lab .lab-sub{color:var(--muted);font-size:14.5px;font-weight:300;margin-bottom:6px;max-width:640px}
+.lab-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 4px}
+.lab-meta .pill{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.06em;padding:5px 11px;border-radius:100px;background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--muted)}
+.lab-meta .pill.go{color:var(--lime);border-color:rgba(190,242,100,.3);background:rgba(190,242,100,.08)}
+
+/* progress ring */
+.lab-progress{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.lab-progress .ring{position:relative;width:52px;height:52px}
+.lab-progress svg{transform:rotate(-90deg)}
+.lab-progress .ring-bg{stroke:rgba(255,255,255,.1)}
+.lab-progress .ring-fg{stroke:var(--amber);stroke-linecap:round;transition:stroke-dashoffset .5s cubic-bezier(.16,1,.3,1)}
+.lab-progress .ring-txt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--amber)}
+.lab-progress.done .ring-fg{stroke:var(--lime)}
+.lab-progress.done .ring-txt{color:var(--lime)}
+
+/* launch buttons */
+.lab-launch{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 6px}
+.lab-btn{display:inline-flex;align-items:center;gap:8px;font-family:'Space Grotesk',sans-serif;font-size:13.5px;font-weight:600;padding:10px 18px;border-radius:100px;text-decoration:none;cursor:pointer;border:1px solid var(--line-2);transition:all .22s ease;letter-spacing:-.01em}
+.lab-btn.primary{background:var(--amber);color:#1a1206;border-color:var(--amber)}
+.lab-btn.primary:hover{transform:translateY(-2px);box-shadow:0 10px 28px -8px rgba(255,179,71,.6)}
+.lab-btn.alt{background:transparent;color:var(--ink)}
+.lab-btn.alt:hover{border-color:var(--amber);background:rgba(255,179,71,.08)}
+.lab-btn .ext{font-size:11px;opacity:.7}
+
+/* copyable prompt box */
+.lab-prompt{margin:16px 0;border-radius:14px;border:1px solid var(--line-2);background:rgba(0,0,0,.32);overflow:hidden}
+.lab-prompt .lp-head{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.03)}
+.lab-prompt .lp-label{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--soft)}
+.lab-copy{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.06em;padding:5px 12px;border-radius:100px;border:1px solid var(--line-2);background:rgba(255,255,255,.05);color:var(--amber);cursor:pointer;transition:all .2s ease;display:inline-flex;align-items:center;gap:6px}
+.lab-copy:hover{border-color:var(--amber);background:rgba(255,179,71,.1)}
+.lab-copy.copied{color:var(--lime);border-color:rgba(190,242,100,.4);background:rgba(190,242,100,.1)}
+.lab-prompt .lp-body{padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:13.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap}
+
+/* checkable steps */
+.lab-steps{list-style:none;margin-top:16px;display:flex;flex-direction:column;gap:9px}
+.lab-step{display:flex;gap:13px;align-items:flex-start;font-size:14.5px;color:var(--ink);font-weight:300;cursor:pointer;padding:9px 12px;border-radius:12px;border:1px solid transparent;transition:all .2s ease;user-select:none}
+.lab-step:hover{background:rgba(255,255,255,.04);border-color:var(--line)}
+.lab-step .box{flex-shrink:0;width:24px;height:24px;border-radius:7px;border:2px solid var(--line-2);display:flex;align-items:center;justify-content:center;transition:all .25s cubic-bezier(.34,1.56,.64,1);margin-top:1px}
+.lab-step .box svg{width:13px;height:13px;opacity:0;transform:scale(.4);transition:all .25s ease}
+.lab-step.done .box{background:var(--lime);border-color:var(--lime)}
+.lab-step.done .box svg{opacity:1;transform:scale(1)}
+.lab-step.done .st-text{color:var(--soft);text-decoration:line-through;text-decoration-color:rgba(255,255,255,.25)}
+.lab-step .st-text em{font-style:italic;color:var(--amber)}
+.lab-step .st-text code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:5px;font-size:12.5px}
+.lab-done-banner{margin-top:16px;padding:14px 18px;border-radius:12px;background:rgba(190,242,100,.1);border:1px solid rgba(190,242,100,.3);font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--lime);opacity:0;max-height:0;overflow:hidden;transition:all .45s cubic-bezier(.16,1,.3,1)}
+.lab-done-banner.show{opacity:1;max-height:80px;margin-top:16px}
+
+/* ===== Transformer assembly line ===== */
+.tf-stage{margin-top:8px}
+.tf-track{display:flex;align-items:stretch;gap:0;margin:24px 0;position:relative;flex-wrap:wrap}
+.tf-block{flex:1;min-width:150px;position:relative;padding:22px 18px;border-radius:16px;background:var(--glass-2);border:1px solid var(--line-2);transition:all .5s cubic-bezier(.16,1,.3,1);text-align:center;opacity:.45}
+.tf-block.lit{opacity:1;transform:translateY(-6px)}
+.tf-block .tf-ico{font-size:30px;margin-bottom:10px;display:block}
+.tf-block h4{font-size:16px;margin-bottom:5px;color:var(--ink)}
+.tf-block p{font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.45}
+.tf-block.lit.enc{border-color:var(--cyan);box-shadow:0 0 0 1px rgba(94,234,212,.3),0 16px 40px -16px rgba(94,234,212,.4)}
+.tf-block.lit.dec{border-color:var(--pink);box-shadow:0 0 0 1px rgba(244,114,182,.3),0 16px 40px -16px rgba(244,114,182,.4)}
+.tf-arrow{display:flex;align-items:center;justify-content:center;padding:0 6px;color:var(--soft);font-size:22px;flex-shrink:0;opacity:.4;transition:all .4s ease}
+.tf-arrow.lit{color:var(--amber);opacity:1}
+@media(max-width:760px){.tf-arrow{transform:rotate(90deg);padding:6px 0}}
+.tf-zone-labels{display:flex;justify-content:space-between;margin-bottom:8px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.tf-zone-labels .enc-l{color:var(--cyan)}
+.tf-zone-labels .dec-l{color:var(--pink)}
+.tf-flow-readout{margin-top:18px;padding:16px 20px;border-radius:12px;background:rgba(0,0,0,.3);border:1px solid var(--line-2);font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--ink);min-height:54px;display:flex;align-items:center;gap:10px}
+.tf-flow-readout .dot{width:8px;height:8px;border-radius:50%;background:var(--amber);flex-shrink:0;animation:pulse 1.4s ease-in-out infinite}
+.tf-controls{display:flex;gap:12px;margin-top:20px;flex-wrap:wrap}
+.tf-analogy{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:8px}
+@media(max-width:760px){.tf-analogy{grid-template-columns:1fr}}
+.tf-analogy .ana{padding:24px;border-radius:18px;border:1px solid var(--line-2);background:var(--glass)}
+.tf-analogy .ana.enc{border-color:rgba(94,234,212,.3)}
+.tf-analogy .ana.dec{border-color:rgba(244,114,182,.3)}
+.tf-analogy .ana .ana-tag{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;display:inline-block;margin-bottom:10px}
+.tf-analogy .ana.enc .ana-tag{color:var(--cyan)}
+.tf-analogy .ana.dec .ana-tag{color:var(--pink)}
+.tf-analogy .ana h4{font-size:19px;margin-bottom:8px}
+.tf-analogy .ana p{font-size:14px;color:var(--muted);font-weight:300;line-height:1.5}
+
+/* ===== 3D transformer architecture canvas ===== */
+.tf3d-wrap{position:relative;border-radius:18px;overflow:hidden;border:1px solid var(--line-2);background:radial-gradient(ellipse at 50% 30%,rgba(20,24,46,.6),rgba(0,0,0,.3));height:460px}
+.tf3d-wrap canvas{display:block}
+.tf3d-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.05em;pointer-events:none;text-align:center}
+.tf3d-legend{position:absolute;top:14px;left:14px;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.tf3d-legend .lg{display:flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)}
+.tf3d-legend .lg .sw{width:12px;height:12px;border-radius:3px}
+.tf3d-controls{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+
+/* ===== "inside one layer" diagram ===== */
+.layer-diagram{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:8px}
+@media(max-width:860px){.layer-diagram{grid-template-columns:1fr}}
+.layer-col{border-radius:18px;border:1px solid var(--line-2);overflow:hidden;background:rgba(0,0,0,.25)}
+.layer-col .lc-head{padding:14px 18px;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.layer-col.enc .lc-head{color:var(--cyan);background:rgba(94,234,212,.07)}
+.layer-col.dec .lc-head{color:var(--pink);background:rgba(244,114,182,.07)}
+.layer-col .lc-body{padding:18px;display:flex;flex-direction:column;gap:12px}
+.sublayer{position:relative;padding:16px 18px;border-radius:12px;background:var(--glass);border:1px solid var(--line);transition:all .4s cubic-bezier(.16,1,.3,1)}
+.sublayer.lit{transform:scale(1.02)}
+.sublayer.lit.attn{border-color:var(--amber);box-shadow:0 0 0 1px rgba(255,179,71,.3)}
+.sublayer.lit.masked{border-color:var(--violet);box-shadow:0 0 0 1px rgba(167,139,250,.3)}
+.sublayer.lit.cross{border-color:var(--blue);box-shadow:0 0 0 1px rgba(96,165,250,.3)}
+.sublayer.lit.ff{border-color:var(--lime);box-shadow:0 0 0 1px rgba(190,242,100,.3)}
+.sublayer .sl-name{font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:600;color:var(--ink);margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.sublayer .sl-name .tag{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.08em;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+.sublayer.attn .sl-name .tag,.sublayer.masked .sl-name .tag,.sublayer.cross .sl-name .tag{background:rgba(255,179,71,.15);color:var(--amber)}
+.sublayer.ff .sl-name .tag{background:rgba(190,242,100,.15);color:var(--lime)}
+.sublayer p{font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.45}
+.sublayer .addnorm{margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--soft);letter-spacing:.03em}
+.layer-arrow{text-align:center;color:var(--soft);font-size:16px;line-height:0.5;opacity:.6}
+.ff-detail{margin-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ff-neuron{width:10px;height:10px;border-radius:50%;background:var(--lime);opacity:.3;transition:all .3s ease}
+.sublayer.ff.lit .ff-neuron{opacity:1}
+
+/* ===== architecture families ===== */
+.fam-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:8px}
+@media(max-width:860px){.fam-grid{grid-template-columns:1fr}}
+.fam{border-radius:18px;border:1px solid var(--line-2);padding:24px;background:var(--glass);transition:all .5s cubic-bezier(.16,1,.3,1);position:relative;overflow:hidden}
+.fam:hover{transform:translateY(-5px)}
+.fam.enc{border-top:3px solid var(--cyan)}
+.fam.dec{border-top:3px solid var(--pink)}
+.fam.both{border-top:3px solid var(--amber)}
+.fam .fam-vis{display:flex;gap:6px;margin-bottom:16px;height:46px;align-items:flex-end}
+.fam .blk{flex:1;border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:var(--bg)}
+.fam .blk.e{background:linear-gradient(180deg,var(--cyan),rgba(94,234,212,.5))}
+.fam .blk.d{background:linear-gradient(180deg,var(--pink),rgba(244,114,182,.5))}
+.fam .fam-label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
+.fam.enc .fam-label{color:var(--cyan)}
+.fam.dec .fam-label{color:var(--pink)}
+.fam.both .fam-label{color:var(--amber)}
+.fam h4{font-size:18px;margin-bottom:8px}
+.fam .fam-eg{font-size:13px;color:var(--muted);font-weight:300;line-height:1.5;margin-bottom:12px}
+.fam .fam-models{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--soft);padding-top:12px;border-top:1px solid var(--line)}
+.fam .fam-models b{color:var(--ink)}
+.fam.dec .fam-badge{position:absolute;top:14px;right:14px;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.08em;padding:4px 9px;border-radius:100px;background:rgba(244,114,182,.15);color:var(--pink);border:1px solid rgba(244,114,182,.4)}
+
+/* ===== why decoder / chatgpt explainer ===== */
+.why-dec{border-radius:20px;border:1px solid rgba(244,114,182,.3);background:linear-gradient(135deg,rgba(244,114,182,.08),rgba(167,139,250,.05));padding:32px 34px;margin-top:8px;position:relative;overflow:hidden}
+.why-dec::before{content:"";position:absolute;top:0;right:0;width:50%;height:100%;background:radial-gradient(circle at 100% 0%,rgba(244,114,182,.12),transparent 60%);pointer-events:none}
+.why-dec h3{font-size:23px;margin-bottom:8px;color:var(--ink)}
+.why-dec .wd-lead{color:var(--muted);font-size:15px;font-weight:300;margin-bottom:22px;max-width:680px}
+.why-dec .wd-lead b{color:var(--ink)}
+.wd-steps{display:flex;flex-direction:column;gap:14px}
+.wd-row{display:flex;gap:16px;align-items:flex-start}
+.wd-row .wd-n{flex-shrink:0;width:30px;height:30px;border-radius:9px;background:var(--pink);color:var(--bg);font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center}
+.wd-row .wd-t{font-size:14.5px;color:var(--ink);font-weight:300;line-height:1.5;padding-top:3px}
+.wd-row .wd-t b{color:var(--pink);font-weight:600}
+.wd-punch{margin-top:22px;padding:16px 20px;border-radius:12px;background:rgba(244,114,182,.1);border:1px solid rgba(244,114,182,.3);font-family:'Instrument Serif',serif;font-style:italic;font-size:18px;color:var(--ink)}
+.wd-punch b{font-style:normal;color:var(--pink)}
+
+/* ===== decoder example typewriter ===== */
+.dec-examples{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:8px}
+@media(max-width:760px){.dec-examples{grid-template-columns:1fr}}
+.dec-eg{padding:20px 22px;border-radius:16px;border:1px solid var(--line-2);background:var(--glass);transition:all .3s ease;cursor:pointer}
+.dec-eg:hover{border-color:var(--pink);transform:translateY(-3px)}
+.dec-eg .de-task{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--pink);margin-bottom:10px}
+.dec-eg h4{font-size:16px;margin-bottom:6px}
+.dec-eg p{font-size:13px;color:var(--muted);font-weight:300;line-height:1.45}
+.typewriter-demo{margin-top:8px}
+.tw-screen{font-family:'JetBrains Mono',monospace;font-size:clamp(15px,2.2vw,20px);line-height:1.7;padding:24px;border-radius:14px;background:rgba(0,0,0,.4);border:1px solid var(--line-2);min-height:90px}
+.tw-prompt{color:var(--soft)}
+.tw-out{color:var(--pink)}
+.tw-cursor{display:inline-block;width:9px;height:1.1em;background:var(--pink);vertical-align:text-bottom;margin-left:1px;animation:blink 1s step-end infinite}
+.tw-token{opacity:0;animation:fadeIn .15s ease forwards}
+@keyframes fadeIn{to{opacity:1}}
+.tw-controls{display:flex;gap:12px;margin-top:18px;flex-wrap:wrap}
+
+/* ===== real products: encoder vs decoder ===== */
+.prod-split{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:8px}
+@media(max-width:860px){.prod-split{grid-template-columns:1fr}}
+.prod-col{border-radius:20px;border:1px solid var(--line-2);background:rgba(0,0,0,.22);overflow:hidden}
+.prod-col.enc{border-top:3px solid var(--cyan)}
+.prod-col.dec{border-top:3px solid var(--pink)}
+.prod-col .pc-top{padding:20px 24px 16px;border-bottom:1px solid var(--line)}
+.prod-col .pc-kicker{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.prod-col.enc .pc-kicker{color:var(--cyan)}
+.prod-col.dec .pc-kicker{color:var(--pink)}
+.prod-col .pc-kicker .sw{width:11px;height:11px;border-radius:3px}
+.prod-col.enc .pc-kicker .sw{background:var(--cyan)}
+.prod-col.dec .pc-kicker .sw{background:var(--pink)}
+.prod-col h4{font-size:21px;margin-bottom:4px}
+.prod-col .pc-tagline{font-size:13.5px;color:var(--muted);font-weight:300}
+.prod-list{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.prod-item{display:flex;gap:14px;align-items:flex-start;padding:13px 14px;border-radius:12px;background:var(--glass);border:1px solid transparent;transition:all .25s ease}
+.prod-item:hover{border-color:var(--line-2);transform:translateX(4px)}
+.prod-item .pi-ico{font-size:22px;flex-shrink:0;line-height:1.2}
+.prod-item .pi-body strong{display:block;font-family:'Space Grotesk',sans-serif;font-size:14.5px;font-weight:600;color:var(--ink);margin-bottom:2px}
+.prod-item .pi-body span{font-size:12.5px;color:var(--muted);font-weight:300;line-height:1.4}
+.prod-item .pi-body span b{color:var(--ink);font-weight:600}
+.prod-foot{padding:14px 22px 20px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.04em;border-top:1px solid var(--line)}
+.prod-col.enc .prod-foot{color:var(--cyan)}
+.prod-col.dec .prod-foot{color:var(--pink)}
+.prod-foot b{color:var(--ink)}
+.prod-note{margin-top:20px;padding:16px 20px;border-radius:12px;background:rgba(255,179,71,.08);border:1px solid rgba(255,179,71,.28);font-size:14px;color:var(--muted);font-weight:300;line-height:1.5}
+.prod-note b{color:var(--amber);font-weight:600}
+
+.demo{background:var(--glass-2);border:1px solid var(--line-2);border-radius:20px;padding:30px;margin-top:28px;backdrop-filter:blur(14px)}
+.demo-h{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.demo-h h3{font-size:20px}
+.demo-h .live{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--lime);display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:100px;background:rgba(190,242,100,.1);border:1px solid rgba(190,242,100,.3)}
+.demo-h .live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--lime);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(190,242,100,.5)}50%{opacity:.6;box-shadow:0 0 0 6px rgba(190,242,100,0)}}
+.demo-sub{color:var(--soft);font-size:14px;margin-bottom:22px;font-weight:300}
+
+.btn{font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:600;padding:11px 22px;border-radius:100px;border:none;cursor:pointer;background:var(--amber);color:#1a1206;transition:all .25s ease;letter-spacing:-.01em}
+.btn:hover{transform:translateY(-2px);box-shadow:0 10px 30px -8px rgba(255,179,71,.6)}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line-2)}
+.btn.ghost:hover{border-color:var(--amber);box-shadow:none;background:rgba(255,179,71,.08)}
+input[type=text]{width:100%;font-family:'JetBrains Mono',monospace;font-size:15px;padding:14px 18px;border-radius:12px;background:rgba(0,0,0,.3);border:1px solid var(--line-2);color:var(--ink);outline:none;transition:border-color .25s ease}
+input[type=text]:focus{border-color:var(--amber)}
+
+footer{position:relative;z-index:5;text-align:center;padding:90px 32px 60px;border-top:1px solid var(--line);margin-top:60px}
+footer .f-mark{font-family:'Instrument Serif',serif;font-style:italic;font-size:28px;color:var(--amber);margin-bottom:12px}
+footer p{color:var(--soft);font-size:14px;font-weight:300}
+footer .f-meta{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--soft);margin-top:20px;letter-spacing:.1em}
+
+/* ===== Tokenizer ===== */
+.token-presets{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.token-preset{font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 12px;border-radius:100px;cursor:pointer;background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--muted);transition:all .2s ease}
+.token-preset:hover{border-color:var(--amber);color:var(--ink)}
+.token-display{display:flex;flex-wrap:wrap;gap:6px;margin:20px 0;min-height:44px}
+.token-chip{font-family:'JetBrains Mono',monospace;font-size:14px;padding:7px 12px;border-radius:9px;background:linear-gradient(135deg,rgba(255,179,71,.18),rgba(255,140,66,.1));border:1px solid rgba(255,179,71,.35);color:var(--amber);opacity:0;transform:scale(.6) translateY(8px);animation:chipPop .4s cubic-bezier(.34,1.56,.64,1) forwards}
+@keyframes chipPop{to{opacity:1;transform:none}}
+.token-stats{display:flex;gap:32px;flex-wrap:wrap;margin-top:8px;padding-top:20px;border-top:1px solid var(--line)}
+.token-stats .stat{display:flex;flex-direction:column;gap:3px}
+.token-stats .v{font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;color:var(--ink)}
+.token-stats .l{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.05em}
+
+/* ===== Next-token predictor ===== */
+.predictor{margin-top:8px}
+.pred-sentence{font-family:'JetBrains Mono',monospace;font-size:clamp(16px,2.4vw,24px);line-height:1.7;padding:20px;background:rgba(0,0,0,.3);border-radius:14px;border:1px solid var(--line-2);margin-bottom:20px;min-height:70px}
+.pred-sentence .built{color:var(--ink)}
+.pred-sentence .cursor{display:inline-block;width:2px;height:1.1em;background:var(--amber);vertical-align:middle;margin-left:2px;animation:blink 1s step-end infinite}
+@keyframes blink{50%{opacity:0}}
+.pred-options{display:flex;flex-direction:column;gap:10px}
+.pred-opt{display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--line);cursor:pointer;transition:all .2s ease}
+.pred-opt:hover{border-color:var(--amber);background:rgba(255,179,71,.07);transform:translateX(4px)}
+.pred-opt .word{font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--ink);min-width:90px}
+.pred-opt .bar-wrap{flex:1;height:8px;background:rgba(255,255,255,.06);border-radius:100px;overflow:hidden}
+.pred-opt .bar{height:100%;border-radius:100px;background:linear-gradient(90deg,var(--amber-2),var(--amber));width:0;transition:width .8s cubic-bezier(.16,1,.3,1)}
+.pred-opt .pct{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--amber);min-width:46px;text-align:right}
+.pred-opt.dim{opacity:.55}
+.pred-opt.dim .bar{background:var(--soft)}
+.pred-opt.dim .pct{color:var(--soft)}
+
+/* ===== Embeddings / vector math ===== */
+.vec-math{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;font-family:'Space Grotesk',sans-serif;font-size:clamp(20px,3vw,32px);font-weight:600;margin:8px 0 24px}
+.vec-word{padding:10px 18px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid var(--line-2)}
+.vec-word.king{color:var(--blue);border-color:rgba(96,165,250,.4)}
+.vec-word.man{color:var(--pink);border-color:rgba(244,114,182,.4)}
+.vec-word.woman{color:var(--violet);border-color:rgba(167,139,250,.4)}
+.vec-word.queen{color:var(--amber);border-color:rgba(255,179,71,.5);opacity:0;transform:scale(.5);transition:all .5s cubic-bezier(.34,1.56,.64,1)}
+.vec-word.queen.show{opacity:1;transform:none}
+.vec-op{color:var(--soft)}
+.vec-canvas-wrap{border-radius:16px;overflow:hidden;border:1px solid var(--line-2);background:rgba(0,0,0,.25);height:340px;position:relative}
+.vec-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--soft);letter-spacing:.05em;pointer-events:none}
+
+/* ===== Attention ===== */
+.att-toggle{display:flex;gap:8px;margin-bottom:24px}
+.att-toggle button{font-family:'JetBrains Mono',monospace;font-size:13px;padding:9px 18px;border-radius:100px;cursor:pointer;background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--muted);transition:all .2s ease}
+.att-toggle button.active{background:var(--amber);color:#1a1206;border-color:var(--amber)}
+.att-sentence{font-family:'Space Grotesk',sans-serif;font-size:clamp(18px,2.6vw,26px);line-height:1.8;font-weight:500}
+.att-word{transition:all .4s ease;padding:2px 4px;border-radius:6px}
+.att-strong{background:rgba(255,179,71,.3);color:var(--amber);box-shadow:0 0 0 1px rgba(255,179,71,.4)}
+.att-weak{opacity:.4}
+.att-explain{margin-top:20px;padding:16px 20px;border-radius:12px;background:rgba(94,234,212,.08);border:1px solid rgba(94,234,212,.25);font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--cyan)}
+
+/* ===== Temperature ===== */
+.temp-demo{margin-top:8px}
+.temp-readout{display:flex;align-items:baseline;gap:14px;margin-bottom:8px;flex-wrap:wrap}
+.temp-readout .tval{font-family:'Space Grotesk',sans-serif;font-size:52px;font-weight:700;color:var(--amber)}
+.temp-readout .tmood{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--muted)}
+.temp-track{position:relative;height:10px;border-radius:100px;background:linear-gradient(90deg,var(--blue),var(--cyan),var(--lime),var(--amber),var(--pink));margin:30px 0;cursor:pointer}
+.temp-thumb{position:absolute;top:50%;left:35%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.5),0 0 0 4px rgba(255,179,71,.3);cursor:grab}
+.temp-thumb:active{cursor:grabbing}
+.temp-scale{display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--soft);margin-top:-18px}
+.temp-output{margin-top:24px;padding:24px;border-radius:14px;background:rgba(0,0,0,.3);border:1px solid var(--line-2);text-align:center}
+.temp-output .tlabel{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--soft);margin-bottom:12px}
+.temp-output .tword{font-family:'Instrument Serif',serif;font-style:italic;font-size:clamp(24px,4vw,40px);color:var(--amber)}
+
+/* ===== Strawberry ===== */
+.berry{margin-top:8px}
+.berry-q{font-size:18px;color:var(--ink);margin-bottom:24px;font-weight:300}
+.berry-q em{font-family:'Instrument Serif',serif;font-style:italic;color:var(--amber)}
+.letter-row{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 22px}
+.letter-tile{width:42px;height:42px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;background:rgba(255,255,255,.05);border:1px solid var(--line-2);color:var(--muted)}
+.letter-tile.r{background:rgba(255,179,71,.2);border-color:var(--amber);color:var(--amber)}
+.berry-label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft);margin:18px 0 6px}
+.berry-tokens{display:flex;gap:8px}
+.berry-reveal{margin-top:20px;font-family:'Instrument Serif',serif;font-style:italic;font-size:20px;color:var(--cyan)}
+
+/* ===== Pipeline / RAG / training stages ===== */
+.flow{display:flex;flex-direction:column;gap:14px;margin-top:8px}
+.flow-step{display:flex;align-items:center;gap:18px;padding:18px 22px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--line);transition:all .5s cubic-bezier(.16,1,.3,1);cursor:pointer}
+.flow-step.active{background:rgba(255,179,71,.1);border-color:var(--amber);transform:translateX(6px)}
+.flow-step .fs-num{flex-shrink:0;width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--soft);transition:all .4s ease}
+.flow-step.active .fs-num{background:var(--amber);color:#1a1206}
+.flow-step .fs-body h4{font-size:17px;margin-bottom:3px}
+.flow-step .fs-body p{font-size:13.5px;color:var(--muted);font-weight:300}
+.flow-controls{display:flex;gap:12px;margin-top:22px}
+
+/* ===== Cards grid ===== */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:8px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:8px}
+@media(max-width:860px){.grid-2,.grid-3{grid-template-columns:1fr}}
+.mini-card{padding:28px;border-radius:18px;background:var(--glass);border:1px solid var(--line-2);transition:all .5s cubic-bezier(.16,1,.3,1)}
+.mini-card:hover{transform:translateY(-5px);border-color:var(--amber);box-shadow:0 24px 48px -16px rgba(0,0,0,.6)}
+.mini-card .mc-tag{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:14px;display:inline-block;padding:4px 10px;border-radius:6px}
+.mini-card.c1 .mc-tag{background:rgba(96,165,250,.12);color:var(--blue)}
+.mini-card.c2 .mc-tag{background:rgba(255,179,71,.12);color:var(--amber)}
+.mini-card.c3 .mc-tag{background:rgba(244,114,182,.12);color:var(--pink)}
+.mini-card.c4 .mc-tag{background:rgba(94,234,212,.12);color:var(--cyan)}
+.mini-card h4{font-size:20px;margin-bottom:10px}
+.mini-card p{font-size:14px;color:var(--muted);font-weight:300}
+.mini-card .mc-eg{margin-top:14px;font-family:'JetBrains Mono',monospace;font-size:12.5px;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,.3);color:var(--soft);border:1px solid var(--line)}
+
+/* ===== Deterministic vs probabilistic ===== */
+.dvp{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:8px}
+@media(max-width:760px){.dvp{grid-template-columns:1fr}}
+.dvp-card{padding:32px;border-radius:20px;border:1px solid var(--line-2);position:relative;overflow:hidden}
+.dvp-card.det{background:linear-gradient(135deg,rgba(96,165,250,.1),transparent)}
+.dvp-card.prob{background:linear-gradient(135deg,rgba(255,140,66,.12),transparent)}
+.dvp-card .dvp-label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.dvp-card.det .dvp-label{color:var(--blue)}
+.dvp-card.prob .dvp-label{color:var(--amber)}
+.dvp-card .dvp-label .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.dvp-card h3{font-size:24px;margin-bottom:12px}
+.dvp-card>p{font-size:14px;color:var(--muted);font-weight:300;margin-bottom:18px}
+.dvp-run{font-family:'JetBrains Mono',monospace;font-size:14px;padding:12px 14px;border-radius:10px;background:rgba(0,0,0,.3);border:1px solid var(--line);margin-bottom:10px}
+.dvp-run .out{color:var(--cyan)}
+.dvp-run .out.vary{color:var(--amber)}
+
+/* ===== Quote ===== */
+.bigquote{margin:80px auto;max-width:880px;text-align:center;padding:0 20px}
+.bigquote p{font-family:'Instrument Serif',serif;font-style:italic;font-size:clamp(24px,4vw,40px);line-height:1.32;color:var(--ink)}
+.bigquote p em{color:var(--amber)}
+.bigquote .cite{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--soft);margin-top:24px;letter-spacing:.1em}
+
+/* ===== Break slide ===== */
+.break-zone{text-align:center;padding:100px 32px;max-width:1180px;margin:0 auto;position:relative;z-index:5}
+.break-zone .bz-icon{font-size:64px;margin-bottom:20px;display:inline-block;animation:float 3s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.break-zone h2{font-size:clamp(36px,6vw,64px);margin-bottom:16px}
+.break-zone h2 .serif{color:var(--amber)}
+.break-zone p{color:var(--muted);font-size:18px;font-weight:300}
+
+/* ===== Stat strip ===== */
+.stat-strip{display:flex;gap:40px;flex-wrap:wrap;justify-content:center;margin-top:40px}
+.stat-strip .ss{text-align:center}
+.stat-strip .ss .v{font-family:'Space Grotesk',sans-serif;font-size:clamp(32px,5vw,52px);font-weight:700;color:var(--amber);line-height:1}
+.stat-strip .ss .l{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--soft);margin-top:8px;letter-spacing:.05em}
+
+/* ===== Recap ===== */
+.recap-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:8px}
+@media(max-width:760px){.recap-grid{grid-template-columns:1fr}}
+.recap-item{display:flex;gap:14px;align-items:center;padding:16px 20px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--line)}
+.recap-item .ri-icon{font-size:22px}
+.recap-item .ri-body strong{display:block;font-family:'Space Grotesk',sans-serif;font-size:15px;color:var(--ink);font-weight:600}
+.recap-item .ri-body span{font-size:13px;color:var(--muted);font-weight:300}
+
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<!-- ===== Loader ===== -->
+<div id="loader">
+  <div class="loader-ring"></div>
+  <div class="loader-text">building the <b>machine</b>…</div>
+</div>
+
+<!-- ===== WebGL background ===== -->
+<canvas id="bg-canvas"></canvas>
+
+<!-- ===== Progress + Nav ===== -->
+<div id="progress-rail"></div>
+<nav id="nav">
+  <a href="#hero">Start</a>
+  <a href="#mindset">Mindset</a>
+  <a href="#what">What it is</a>
+  <a href="#tokens">Tokens</a>
+  <a href="#embed">Embeddings</a>
+  <a href="#attention">Attention</a>
+  <a href="#transformer">Transformer</a>
+  <a href="#training">Training</a>
+  <a href="#temp">Controls</a>
+  <a href="#limits">Limits</a>
+  <a href="#prompt">Prompting</a>
+  <a href="#production">Production</a>
+  <a href="#recap">Recap</a>
+</nav>
+
+<button id="sound-toggle" class="muted" title="Toggle ambient sound">
+  <div class="bars"><span></span><span></span><span></span><span></span></div>
+</button>
+
+<!-- ===== HERO ===== -->
+<section class="hero" id="hero">
+  <p class="hero-kicker">AI for Techies · Session 01</p>
+  <h1>
+    <span class="l">Inside</span>
+    <span class="l">the <span class="serif">Machine</span></span>
+  </h1>
+  <p class="hero-sub">The thing in every meeting. The thing behind the hype. Today we crack an <b>LLM</b> open and walk through it — not as magic, but as a system you can reason about, control, and ship.</p>
+  <div class="hero-badges">
+    <span class="hero-badge"><b>8</b> concepts</span>
+    <span class="hero-badge"><b>8</b> hands-on labs</span>
+    <span class="hero-badge"><b>0</b> equations to memorize</span>
+  </div>
+  <div class="scroll-cue"><span>scroll to enter</span><span class="v"></span></div>
+</section>
+<!-- ===== 01 MINDSET ===== -->
+<section id="mindset">
+  <p class="eyebrow reveal">01 — The Mindset</p>
+  <h2 class="title reveal d1">The rule that just <span class="serif">broke</span></h2>
+  <p class="lead reveal d2">For twenty years software ran on one promise: <span class="hl">same input, same output</span>. Press the button, get the answer. Every time. An LLM quietly tears that promise up. Same prompt, three different replies — and <strong>that's not a bug. It's the entire point.</strong></p>
+
+  <div class="dvp reveal d2">
+    <div class="dvp-card det">
+      <div class="dvp-label"><span class="dot"></span>Classic code · Deterministic</div>
+      <h3><code>add(2, 3)</code></h3>
+      <p>A function maps inputs to one fixed output. Run it a million times — identical result. This is the world you already know.</p>
+      <div class="dvp-run"><code>&gt; add(2,3)</code> → <span class="out">5</span></div>
+      <div class="dvp-run"><code>&gt; add(2,3)</code> → <span class="out">5</span></div>
+      <div class="dvp-run"><code>&gt; add(2,3)</code> → <span class="out">5</span></div>
+      <button class="btn ghost" id="detRun" style="margin-top:8px">Run again</button>
+    </div>
+    <div class="dvp-card prob">
+      <div class="dvp-label"><span class="dot"></span>An LLM · Probabilistic</div>
+      <h3 style="color:var(--amber)"><code>name_my_cafe()</code></h3>
+      <p>Same prompt, sampled fresh each time from a cloud of likely answers. You're not calling a function — you're rolling a very well-educated dice.</p>
+      <div class="dvp-run"><code>&gt; "name my chai café"</code> → <span class="out vary" id="pv1">"Chai Theory"</span></div>
+      <div class="dvp-run"><code>&gt; "name my chai café"</code> → <span class="out vary" id="pv2">"DeskBrew"</span></div>
+      <div class="dvp-run"><code>&gt; "name my chai café"</code> → <span class="out vary" id="pv3">"The Steam Room"</span></div>
+      <button class="btn" id="probRun" style="margin-top:8px">Run again →</button>
+    </div>
+  </div>
+
+  <div class="lab reveal" data-lab="1"></div>
+
+  <div class="bigquote reveal">
+    <p>You're no longer writing instructions. You're <em>shaping the odds</em> of what comes out.</p>
+    <div class="cite">— the whole job, in one sentence</div>
+  </div>
+</section>
+<!-- ===== 02 WHAT IT IS ===== -->
+<section id="what">
+  <p class="eyebrow reveal">02 — What it actually is</p>
+  <h2 class="title reveal d1">It's a <span class="serif">function</span>. Strip the magic.</h2>
+  <p class="lead reveal d2">Here's the whole thing in one line: an LLM takes <strong>some text</strong> and predicts <strong>the single most likely next chunk of text</strong>. Then it sticks that on the end and does it again. And again. Tokens, embeddings, transformers, attention — every fancy word you'll hear today is just <span class="hl">plumbing to make that one guess better</span>.</p>
+
+  <div class="demo reveal d2">
+    <div class="demo-h"><h3>You be the model</h3><span class="live">live</span></div>
+    <p class="demo-sub">The model only ever does ONE thing: pick the next word from a ranked list of guesses. Click the highest-probability word and watch the sentence build itself, one token at a time.</p>
+    <div class="predictor">
+      <div class="pred-sentence"><span class="built" id="builtText">The capital of France is</span><span class="cursor"></span></div>
+      <div class="pred-options" id="predOptions"></div>
+      <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap">
+        <button class="btn" id="predAuto">▶ Let it autocomplete</button>
+        <button class="btn ghost" id="predReset">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-3 reveal" style="margin-top:32px">
+    <div class="mini-card c1">
+      <span class="mc-tag">G — Generative</span>
+      <h4>It creates</h4>
+      <p>It writes new text on the spot. A search engine finds something that already exists; an LLM produces something that never did.</p>
+    </div>
+    <div class="mini-card c2">
+      <span class="mc-tag">P — Pre-trained</span>
+      <h4>It already studied</h4>
+      <p>Before you ever typed a word, it read a huge slice of the internet. That reading is frozen into its weights.</p>
+    </div>
+    <div class="mini-card c3">
+      <span class="mc-tag">T — Transformer</span>
+      <h4>The architecture</h4>
+      <p>The specific design (from a 2017 Google paper) that made all of this actually work at scale. We'll open it up shortly.</p>
+    </div>
+  </div>
+
+  <div class="lab reveal" data-lab="2"></div>
+</section>
+<!-- ===== 03 TOKENS ===== -->
+<section id="tokens">
+  <p class="eyebrow reveal">03 — Tokens</p>
+  <h2 class="title reveal d1">The model can't see <span class="serif">words</span></h2>
+  <p class="lead reveal d2">Small confession that explains a hundred weird behaviours: the model never sees words. It sees <strong>tokens</strong> — sub-word fragments. <span class="hl">"unbelievable"</span> might become <code>un · believ · able</code>. And here's the kicker — you're billed per token, not per word.</p>
+
+  <div class="demo reveal d2">
+    <div class="demo-h"><h3>Try the tokenizer</h3><span class="live">live</span></div>
+    <p class="demo-sub">Type anything. Watch it shatter into the pieces the model actually processes.</p>
+    <input type="text" id="tokenInput" value="unbelievable" placeholder="Type anything…">
+    <div class="token-presets">
+      <span class="token-preset" data-text="hello world">hello world</span>
+      <span class="token-preset" data-text="unbelievable">unbelievable</span>
+      <span class="token-preset" data-text="tokenization">tokenization</span>
+      <span class="token-preset" data-text="antidisestablishmentarianism">antidisestablishmentarianism</span>
+      <span class="token-preset" data-text="मुझे चाय बहुत पसंद है">मुझे चाय बहुत पसंद है</span>
+    </div>
+    <div class="token-display" id="tokenDisplay"></div>
+    <div class="token-stats">
+      <div class="stat"><span class="v" id="charCount">0</span><span class="l">characters</span></div>
+      <div class="stat"><span class="v" id="tokenCount">0</span><span class="l">tokens</span></div>
+      <div class="stat"><span class="v" id="ratioVal">—</span><span class="l">chars / token</span></div>
+    </div>
+  </div>
+
+  <div class="demo reveal">
+    <div class="demo-h"><h3>The strawberry problem 🍓</h3></div>
+    <p class="demo-sub">A question that breaks many LLMs: <em>"How many R's are in strawberry?"</em></p>
+    <div class="berry">
+      <p class="berry-label">What you see · count the R's</p>
+      <div class="letter-row">
+        <div class="letter-tile">S</div><div class="letter-tile">T</div><div class="letter-tile r">R</div><div class="letter-tile">A</div><div class="letter-tile">W</div><div class="letter-tile">B</div><div class="letter-tile">E</div><div class="letter-tile r">R</div><div class="letter-tile r">R</div><div class="letter-tile">Y</div>
+      </div>
+      <p style="color:var(--ink);font-weight:300"><strong style="color:var(--amber)">Three R's.</strong> Obvious to you.</p>
+      <p class="berry-label">What the model sees · token form</p>
+      <div class="berry-tokens">
+        <div class="token-chip" style="animation:none;opacity:1;transform:none">straw</div>
+        <div class="token-chip" style="animation:none;opacity:1;transform:none">berry</div>
+      </div>
+      <p class="berry-reveal">It literally can't see the letters anymore — they got compressed into two chunks. That's why character-counting trips it up.</p>
+    </div>
+  </div>
+
+  <div class="grid-3 reveal" style="margin-top:32px">
+    <div class="mini-card c2"><span class="mc-tag">consequence i</span><h4>Your bill</h4><p>APIs charge per token. Every extra word in a prompt is real money at scale. Tighter prompts = cheaper systems.</p></div>
+    <div class="mini-card c3"><span class="mc-tag">consequence ii</span><h4>The language tax</h4><p>Hindi, Tamil, Telugu can use 3–5× more tokens than the same sentence in English. Same meaning, more cost, slower replies.</p></div>
+    <div class="mini-card c4"><span class="mc-tag">consequence iii</span><h4>Counting is shaky</h4><p>Palindromes, exact find-and-replace, letter counts — anything character-level is fragile, because tokens hide the characters.</p></div>
+  </div>
+
+  <div class="lab reveal" data-lab="3"></div>
+</section>
+
+<!-- ===== 04 EMBEDDINGS ===== -->
+<section id="embed">
+  <p class="eyebrow reveal">04 — Embeddings</p>
+  <h2 class="title reveal d1">Meaning, stored as <span class="serif">coordinates</span></h2>
+  <p class="lead reveal d2">Computers don't understand "king" — they understand numbers. So every token becomes a long list of numbers: an <strong>embedding</strong>. The beautiful part: they're arranged in space so <span class="hl">similar meanings sit close together</span>, and relationships become directions you can do arithmetic on.</p>
+
+  <div class="demo reveal d2">
+    <div class="demo-h"><h3>The famous one: King − Man + Woman</h3><span class="live">live · 3D</span></div>
+    <p class="demo-sub">Drag to orbit the space. Each point is a word placed by meaning. Run the equation and watch where it lands.</p>
+    <div class="vec-math">
+      <span class="vec-word king">King</span>
+      <span class="vec-op">−</span>
+      <span class="vec-word man">Man</span>
+      <span class="vec-op">+</span>
+      <span class="vec-word woman">Woman</span>
+      <span class="vec-op" id="vecEq">=</span>
+      <span class="vec-word queen" id="vecQueen">Queen</span>
+    </div>
+    <div class="vec-canvas-wrap"><canvas id="vecCanvas"></canvas><div class="vec-hint">drag to orbit · scroll to zoom</div></div>
+    <div style="margin-top:20px"><button class="btn" id="vecBtn">Solve the equation →</button></div>
+  </div>
+
+  <div class="bigquote reveal">
+    <p>Nobody programmed <em>"royal"</em> or <em>"gender"</em> into the model. It discovered those directions on its own, just from reading.</p>
+    <div class="cite">— why embeddings feel like magic (they're not)</div>
+  </div>
+</section>
+<!-- ===== 05 ATTENTION ===== -->
+<section id="attention">
+  <p class="eyebrow reveal">05 — Attention</p>
+  <h2 class="title reveal d1">How words <span class="serif">look at</span> each other</h2>
+  <p class="lead reveal d2">This is the 2017 idea that changed everything (the paper was literally called <em>"Attention Is All You Need"</em>). Before producing each word, every token gets to <strong>look at every other token</strong> and decide which ones matter. That's how the model handles context — and resolves sentences that should be impossible.</p>
+
+  <div class="demo reveal d2">
+    <div class="demo-h"><h3>The pronoun puzzle</h3><span class="live">live</span></div>
+    <p class="demo-sub">Flip one word and watch what "it" points to change. Same sentence structure — opposite meaning. Attention is what figures this out.</p>
+    <div class="att-toggle">
+      <button class="active" data-v="big">…too <b style="margin-left:4px">big</b></button>
+      <button data-v="small">…too <b style="margin-left:4px">small</b></button>
+    </div>
+    <p class="att-sentence">The <span class="att-word a-trophy">trophy</span> didn't fit in the <span class="att-word a-suitcase">suitcase</span> because <span class="att-word" style="color:var(--cyan)">it</span> was too <span id="attAdj" style="color:var(--amber);font-style:italic;font-family:'Instrument Serif',serif">big.</span></p>
+    <div class="att-explain" id="attExplain"></div>
+  </div>
+
+  <div class="grid-2 reveal" style="margin-top:32px">
+    <div class="mini-card c1"><span class="mc-tag">🔍 Attention room</span><h4>Who matters right now?</h4><p>Every token looks across the whole sentence and weights what's relevant. "it" leans hard on "trophy" or "suitcase" depending on context.</p></div>
+    <div class="mini-card c2"><span class="mc-tag">🧠 Feed-forward room</span><h4>Think, then pass up</h4><p>After attention gathers context, each token gets processed and handed to the next layer. Stack ~50 of these and you get GPT-scale reasoning.</p></div>
+  </div>
+
+  <div class="lab reveal" data-lab="4"></div>
+</section>
+
+<!-- ===== 5.5 TRANSFORMER ===== -->
+<section id="transformer">
+  <p class="eyebrow reveal">06 — The Transformer</p>
+  <h2 class="title reveal d1">The <span class="serif">machine</span> that does it all</h2>
+  <p class="lead reveal d2">"Transformer" is just the <strong>name of the engine</strong> inside GPT, Gemini, Claude — all of them. It has two halves with very different jobs: an <span class="hl">encoder</span> that <em>understands</em> what came in, and a <span class="hl">decoder</span> that <em>writes</em> what goes out. Press play and watch a sentence flow through it.</p>
+
+  <div class="demo reveal d2">
+    <div class="demo-h"><h3>Watch a thought travel through</h3><span class="live">live</span></div>
+    <p class="demo-sub">Translating <b style="color:var(--ink)">"I love chai" → "मुझे चाय पसंद है"</b>. Each block lights up as the sentence passes through it.</p>
+    <div class="tf-stage">
+      <div class="tf-zone-labels">
+        <span class="enc-l">◆ Encoder · understands</span>
+        <span class="dec-l">decoder · writes ◆</span>
+      </div>
+      <div class="tf-track" id="tfTrack">
+        <div class="tf-block enc" data-i="0"><span class="tf-ico">📥</span><h4>Input</h4><p>"I love chai" arrives as text.</p></div>
+        <div class="tf-arrow" data-a="0">→</div>
+        <div class="tf-block enc" data-i="1"><span class="tf-ico">🔢</span><h4>Tokenize + embed</h4><p>Words become number-vectors.</p></div>
+        <div class="tf-arrow" data-a="1">→</div>
+        <div class="tf-block enc" data-i="2"><span class="tf-ico">🧠</span><h4>Encoder reads</h4><p>Attention builds the full meaning.</p></div>
+        <div class="tf-arrow" data-a="2">→</div>
+        <div class="tf-block dec" data-i="3"><span class="tf-ico">✍️</span><h4>Decoder writes</h4><p>Generates one word at a time.</p></div>
+        <div class="tf-arrow" data-a="3">→</div>
+        <div class="tf-block dec" data-i="4"><span class="tf-ico">📤</span><h4>Output</h4><p>"मुझे चाय पसंद है" comes out.</p></div>
+      </div>
+      <div class="tf-flow-readout" id="tfReadout"><span class="dot"></span><span id="tfReadoutText">Press play to send the sentence through the machine.</span></div>
+      <div class="tf-controls">
+        <button class="btn" id="tfPlay">▶ Send it through</button>
+        <button class="btn ghost" id="tfReset">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tf-analogy reveal" style="margin-top:32px">
+    <div class="ana enc">
+      <span class="ana-tag">◆ Encoder = the listener</span>
+      <h4>It understands the input</h4>
+      <p>Like a person reading your whole sentence before replying — taking in every word and how they relate, building a rich picture of meaning. Great for understanding tasks: search, classification, sentiment.</p>
+    </div>
+    <div class="ana dec">
+      <span class="ana-tag">decoder = the speaker ◆</span>
+      <h4>It produces the output</h4>
+      <p>Like a person speaking one word at a time, each choice shaped by what they've already said. Great for generation: chat, writing, translation. <b style="color:var(--ink)">GPT is basically a giant decoder.</b></p>
+    </div>
+  </div>
+
+  <div class="bigquote reveal">
+    <p>Encoder <em>reads the room</em>. Decoder <em>speaks the words</em>. Stack dozens of each, and you get every chatbot you've ever used.</p>
+    <div class="cite">— the transformer, minus the math</div>
+  </div>
+
+  <!-- 3D architecture -->
+  <h3 class="reveal" style="font-size:clamp(24px,3.4vw,34px);margin:30px 0 6px;font-family:'Space Grotesk';font-weight:600;letter-spacing:-.02em">See it as a <span class="serif" style="color:var(--amber)">building</span></h3>
+  <p class="reveal d1" style="color:var(--muted);font-size:16px;max-width:720px;margin-bottom:18px;font-weight:300">The real architecture is a <strong style="color:var(--ink)">stack of identical layers</strong> — encoder layers on the left, decoder layers on the right. Each floor refines the meaning a little more. Drag to orbit the tower.</p>
+  <div class="tf3d-wrap reveal d1">
+    <canvas id="tfCanvas"></canvas>
+    <div class="tf3d-legend">
+      <div class="lg"><span class="sw" style="background:#5eead4"></span> Encoder layer</div>
+      <div class="lg"><span class="sw" style="background:#f472b6"></span> Decoder layer</div>
+      <div class="lg"><span class="sw" style="background:#ffb347"></span> Attention sublayer</div>
+      <div class="lg"><span class="sw" style="background:#bef264"></span> Feed-forward sublayer</div>
+    </div>
+    <div class="tf3d-hint">drag to orbit · scroll to zoom</div>
+  </div>
+  <div class="tf3d-controls reveal">
+    <button class="btn" id="tf3dFlow">▶ Pulse the data flow</button>
+    <button class="btn ghost" id="tf3dSpin">Toggle auto-spin</button>
+  </div>
+
+  <!-- inside one layer -->
+  <h3 class="reveal" style="font-size:clamp(24px,3.4vw,34px);margin:46px 0 6px;font-family:'Space Grotesk';font-weight:600;letter-spacing:-.02em">Inside <span class="serif" style="color:var(--amber)">one floor</span></h3>
+  <p class="reveal d1" style="color:var(--muted);font-size:16px;max-width:720px;margin-bottom:18px;font-weight:300">Every layer is built from two simple moves: <strong style="color:var(--ink)">attention</strong> (look around and gather context) and a <strong style="color:var(--ink)">feed-forward</strong> network (think privately about what you gathered). The decoder just adds one extra attention step. Press play to watch data climb through.</p>
+
+  <div class="layer-diagram reveal d1">
+    <div class="layer-col enc">
+      <div class="lc-head">◆ One Encoder layer</div>
+      <div class="lc-body">
+        <div class="sublayer attn" data-step="0">
+          <div class="sl-name"><span class="tag">step 1</span> Self-Attention</div>
+          <p>Every word looks at every <em>other</em> word in the input and pulls in what's relevant. "it" finds "trophy."</p>
+          <div class="addnorm">+ add &amp; normalise ↺</div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="sublayer ff" data-step="1">
+          <div class="sl-name"><span class="tag">step 2</span> Feed-Forward</div>
+          <p>Each word is processed on its own through a small neural net — digesting what attention gathered.</p>
+          <div class="ff-detail"><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span></div>
+          <div class="addnorm">+ add &amp; normalise ↺</div>
+        </div>
+      </div>
+    </div>
+    <div class="layer-col dec">
+      <div class="lc-head">◆ One Decoder layer</div>
+      <div class="lc-body">
+        <div class="sublayer masked" data-step="0">
+          <div class="sl-name"><span class="tag">step 1</span> Masked Self-Attention</div>
+          <p>Looks only at words <em>already written</em> — never peeks ahead. That's what forces it to write left-to-right.</p>
+          <div class="addnorm">+ add &amp; normalise ↺</div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="sublayer cross" data-step="1">
+          <div class="sl-name"><span class="tag">step 2</span> Cross-Attention</div>
+          <p>Looks back at the <em>encoder's</em> understanding of the input. <span style="color:var(--soft)">(Decoder-only models like GPT skip this.)</span></p>
+          <div class="addnorm">+ add &amp; normalise ↺</div>
+        </div>
+        <div class="layer-arrow">▼</div>
+        <div class="sublayer ff" data-step="2">
+          <div class="sl-name"><span class="tag">step 3</span> Feed-Forward</div>
+          <p>Same private "thinking" step, then hand the result up to the next floor.</p>
+          <div class="ff-detail"><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span><span class="ff-neuron"></span></div>
+          <div class="addnorm">+ add &amp; normalise ↺</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tf3d-controls reveal">
+    <button class="btn" id="layerPlay">▶ Climb through a layer</button>
+    <button class="btn ghost" id="layerReset">Reset</button>
+  </div>
+
+  <!-- three families -->
+  <h3 class="reveal" style="font-size:clamp(24px,3.4vw,34px);margin:46px 0 6px;font-family:'Space Grotesk';font-weight:600;letter-spacing:-.02em">Three ways to <span class="serif" style="color:var(--amber)">wire it up</span></h3>
+  <p class="reveal d1" style="color:var(--muted);font-size:16px;max-width:720px;margin-bottom:18px;font-weight:300">You don't always need both halves. Pick the parts that fit the job — and you get three different families of model.</p>
+  <div class="fam-grid reveal d1">
+    <div class="fam enc">
+      <div class="fam-vis"><span class="blk e">E</span><span class="blk e">E</span><span class="blk e">E</span></div>
+      <div class="fam-label">Encoder-only</div>
+      <h4>The reader 📖</h4>
+      <p class="fam-eg">All understanding, no writing. Reads the whole input at once and outputs a label or a score — not new sentences.</p>
+      <p class="fam-eg"><b style="color:var(--ink)">Good for:</b> search, spam detection, sentiment, "is this review positive?"</p>
+      <div class="fam-models"><b>BERT</b> · most search ranking</div>
+    </div>
+    <div class="fam dec">
+      <span class="fam-badge">★ ChatGPT lives here</span>
+      <div class="fam-vis"><span class="blk d">D</span><span class="blk d">D</span><span class="blk d">D</span></div>
+      <div class="fam-label">Decoder-only</div>
+      <h4>The writer ✍️</h4>
+      <p class="fam-eg">Pure generation. Reads what's there and keeps adding the next word, forever. No separate "understanding" stage needed.</p>
+      <p class="fam-eg"><b style="color:var(--ink)">Good for:</b> chat, writing, coding, brainstorming — open-ended output.</p>
+      <div class="fam-models"><b>GPT</b> · Gemini · Claude · Llama</div>
+    </div>
+    <div class="fam both">
+      <div class="fam-vis"><span class="blk e">E</span><span class="blk e">E</span><span class="blk d">D</span><span class="blk d">D</span></div>
+      <div class="fam-label">Encoder + Decoder</div>
+      <h4>The translator 🔄</h4>
+      <p class="fam-eg">Read one thing fully, then write a different thing. The original 2017 design — a clean input→output mapping.</p>
+      <p class="fam-eg"><b style="color:var(--ink)">Good for:</b> translation, summarisation — where input and output differ.</p>
+      <div class="fam-models"><b>T5</b> · original Transformer</div>
+    </div>
+  </div>
+
+  <!-- why chatgpt is decoder-only -->
+  <h3 class="reveal" style="font-size:clamp(24px,3.4vw,34px);margin:46px 0 6px;font-family:'Space Grotesk';font-weight:600;letter-spacing:-.02em">So why is <span class="serif" style="color:var(--amber)">ChatGPT</span> decoder-only?</h3>
+  <div class="why-dec reveal d1">
+    <h3>Because chat is just one long autocomplete.</h3>
+    <p class="wd-lead">An encoder is built to <b>read a fixed input and stop</b>. But a conversation never stops — every reply becomes part of the input for the next reply. So you don't want a separate "reader" and "writer"; you want <b>one thing that reads everything so far and writes the next bit.</b> That's exactly a decoder.</p>
+    <div class="wd-steps">
+      <div class="wd-row"><span class="wd-n">1</span><span class="wd-t">Your whole chat — system prompt, history, your new question — is <b>one big block of text.</b></span></div>
+      <div class="wd-row"><span class="wd-n">2</span><span class="wd-t">The decoder reads all of it and predicts <b>the next word</b> of the reply.</span></div>
+      <div class="wd-row"><span class="wd-n">3</span><span class="wd-t">It adds that word, then reads <b>everything again</b> (including the word it just wrote) and predicts the next.</span></div>
+      <div class="wd-row"><span class="wd-n">4</span><span class="wd-t">Repeat until it decides to stop. The "masked" attention guarantees it only ever uses the past — so it can generate endlessly.</span></div>
+    </div>
+    <div class="wd-punch">An encoder <b>finishes reading and gives a verdict.</b> A decoder <b>never has to stop talking</b> — which is exactly what a chatbot needs.</div>
+  </div>
+
+  <!-- decoder examples typewriter -->
+  <h3 class="reveal" style="font-size:clamp(24px,3.4vw,34px);margin:46px 0 6px;font-family:'Space Grotesk';font-weight:600;letter-spacing:-.02em">A decoder, <span class="serif" style="color:var(--amber)">in action</span></h3>
+  <p class="reveal d1" style="color:var(--muted);font-size:16px;max-width:720px;margin-bottom:18px;font-weight:300">Press play to watch a decoder do its one and only trick — emit the next token, again and again, until the thought is done.</p>
+  <div class="demo reveal d1">
+    <div class="demo-h"><h3>One token at a time</h3><span class="live">live</span></div>
+    <div class="typewriter-demo">
+      <div class="tw-screen" id="twScreen"><span class="tw-prompt">Write a tagline for a chai café: </span><span class="tw-out" id="twOut"></span><span class="tw-cursor"></span></div>
+      <div class="tw-controls">
+        <button class="btn" id="twPlay">▶ Generate</button>
+        <button class="btn ghost" id="twReset">Reset</button>
+        <span style="font-family:'JetBrains Mono';font-size:12px;color:var(--soft);align-self:center" id="twCount">0 tokens</span>
+      </div>
+    </div>
+  </div>
+  <div class="dec-examples reveal d1" style="margin-top:20px">
+    <div class="dec-eg"><div class="de-task">decoder task</div><h4>💬 Chatbots</h4><p>Reads the conversation, writes the next message. The whole of ChatGPT.</p></div>
+    <div class="dec-eg"><div class="de-task">decoder task</div><h4>👨‍💻 Code completion</h4><p>Reads your code so far, writes the next line. Copilot, Cursor, etc.</p></div>
+    <div class="dec-eg"><div class="de-task">decoder task</div><h4>✍️ Writing &amp; drafts</h4><p>Emails, stories, captions — anything where output is free-flowing text.</p></div>
+    <div class="dec-eg"><div class="de-task">decoder task</div><h4>🎯 Autocomplete</h4><p>The humble phone keyboard suggestion is a tiny decoder, same idea.</p></div>
+  </div>
+
+  <!-- real products: encoder vs decoder -->
+  <h3 class="reveal" style="font-size:clamp(24px,3.4vw,34px);margin:46px 0 6px;font-family:'Space Grotesk';font-weight:600;letter-spacing:-.02em">Real products, <span class="serif" style="color:var(--amber)">sorted by engine</span></h3>
+  <p class="reveal d1" style="color:var(--muted);font-size:16px;max-width:740px;margin-bottom:18px;font-weight:300">You use both kinds every day without noticing. Here's the split — <strong style="color:var(--ink)">understanding tools</strong> tend to be encoders, <strong style="color:var(--ink)">generating tools</strong> tend to be decoders.</p>
+
+  <div class="prod-split reveal d1">
+    <div class="prod-col enc">
+      <div class="pc-top">
+        <div class="pc-kicker"><span class="sw"></span>Built on encoders · the readers</div>
+        <h4>📖 Understand &amp; judge</h4>
+        <p class="pc-tagline">Take text in, output a label, score, or match — not new sentences.</p>
+      </div>
+      <div class="prod-list">
+        <div class="prod-item"><span class="pi-ico">🔍</span><div class="pi-body"><strong>Google Search ranking</strong><span>BERT reads your query to understand intent and rank pages. <b>Powered by encoders.</b></span></div></div>
+        <div class="prod-item"><span class="pi-ico">📧</span><div class="pi-body"><strong>Spam &amp; phishing filters</strong><span>Gmail decides "spam or not" by reading the whole email at once.</span></div></div>
+        <div class="prod-item"><span class="pi-ico">⭐</span><div class="pi-body"><strong>Review sentiment analysis</strong><span>Amazon / Swiggy scoring reviews as positive, neutral, or negative.</span></div></div>
+        <div class="prod-item"><span class="pi-ico">🛡️</span><div class="pi-body"><strong>Content moderation</strong><span>Flagging toxic or unsafe posts on social platforms — a yes/no verdict.</span></div></div>
+        <div class="prod-item"><span class="pi-ico">🧩</span><div class="pi-body"><strong>Semantic search &amp; RAG retrieval</strong><span>Turning documents into vectors so the right chunk can be found.</span></div></div>
+      </div>
+      <div class="prod-foot">models: <b>BERT</b> · RoBERTa · DistilBERT · embedding models</div>
+    </div>
+
+    <div class="prod-col dec">
+      <div class="pc-top">
+        <div class="pc-kicker"><span class="sw"></span>Built on decoders · the writers</div>
+        <h4>✍️ Generate &amp; create</h4>
+        <p class="pc-tagline">Read what's there, then keep producing new text, code, or ideas.</p>
+      </div>
+      <div class="prod-list">
+        <div class="prod-item"><span class="pi-ico">💬</span><div class="pi-body"><strong>ChatGPT · Gemini · Claude</strong><span>Conversational assistants that write the next message. <b>Powered by decoders.</b></span></div></div>
+        <div class="prod-item"><span class="pi-ico">👨‍💻</span><div class="pi-body"><strong>GitHub Copilot · Cursor</strong><span>Read your code so far, write the next line or whole function.</span></div></div>
+        <div class="prod-item"><span class="pi-ico">📝</span><div class="pi-body"><strong>Jasper · Notion AI · Gmail "Help me write"</strong><span>Drafting emails, blog posts, and marketing copy from a short prompt.</span></div></div>
+        <div class="prod-item"><span class="pi-ico">🎧</span><div class="pi-body"><strong>Customer-support copilots</strong><span>Tools like Intercom Fin that compose replies to customer questions.</span></div></div>
+        <div class="prod-item"><span class="pi-ico">⌨️</span><div class="pi-body"><strong>Smart Compose &amp; autocomplete</strong><span>Gmail finishing your sentence; your phone keyboard guessing the next word.</span></div></div>
+      </div>
+      <div class="prod-foot">models: <b>GPT-4 / 4o</b> · Gemini · Claude · Llama · Mistral</div>
+    </div>
+  </div>
+
+  <div class="prod-note reveal">💡 <b>The blurry line:</b> modern chatbots quietly use both — an encoder-style step finds the right documents (RAG, search), then a decoder writes the answer. The biggest consumer products you know (ChatGPT, Gemini, Claude) are <b>decoder-first</b>, because their job is to keep generating.</div>
+
+  <div class="lab reveal" data-lab="5"></div>
+</section>
+
+<!-- ===== 07 TRAINING ===== -->
+<section id="training">
+  <p class="eyebrow reveal">07 — Training</p>
+  <h2 class="title reveal d1">How it actually <span class="serif">learned</span></h2>
+  <p class="lead reveal d2">A model isn't built once — it's raised in three stages. Each stage gives it something different: <strong>knowledge</strong>, then <strong>behaviour</strong>, then <strong>values</strong>. Click through them.</p>
+
+  <div class="flow reveal d2" id="trainFlow">
+    <div class="flow-step" data-i="0"><div class="fs-num">1</div><div class="fs-body"><h4>Pre-training → raw knowledge</h4><p>Read a huge chunk of the internet, predicting the next token billions of times. Slow, expensive, done once. This is where it learns facts, grammar, code, and the shape of the world.</p></div></div>
+    <div class="flow-step" data-i="1"><div class="fs-num">2</div><div class="fs-body"><h4>Fine-tuning → good behaviour</h4><p>Show it curated examples of helpful answers in the right format. Cheaper, repeatable. This turns a raw text-predictor into something that acts like an assistant.</p></div></div>
+    <div class="flow-step" data-i="2"><div class="fs-num">3</div><div class="fs-body"><h4>RLHF → human values</h4><p>Humans rank answers; the model learns to prefer the ones people actually like — helpful, honest, harmless. This is the polish that makes it usable by everyone.</p></div></div>
+  </div>
+  <div class="flow-controls reveal">
+    <button class="btn" id="trainPlay">▶ Play the journey</button>
+    <button class="btn ghost" id="trainReset">Reset</button>
+  </div>
+
+  <div class="grid-3 reveal" style="margin-top:32px">
+    <div class="mini-card c1"><span class="mc-tag">Pre-training</span><h4>= Knowledge</h4><p>What it knows.</p></div>
+    <div class="mini-card c2"><span class="mc-tag">Fine-tuning</span><h4>= Behaviour</h4><p>How it acts.</p></div>
+    <div class="mini-card c3"><span class="mc-tag">RLHF</span><h4>= Values</h4><p>What it prefers.</p></div>
+  </div>
+  <p class="lead reveal" style="margin-top:32px;margin-bottom:0"><strong>Engineer's note:</strong> fine-tuning is great for <span class="hl">style and format</span>. For facts that change, don't fine-tune — use retrieval (we'll get there). Baking facts into weights is how you build a model that's confidently out of date.</p>
+</section>
+
+<!-- ===== BREAK ===== -->
+<div class="break-zone">
+  <span class="bz-icon">☕</span>
+  <h2>Ten-minute <span class="serif">breather</span></h2>
+  <p>Stand up. Walk around. Water. Drop your questions in the chat — we'll hit them after.</p>
+</div>
+<!-- ===== 07 CONTROLS / TEMPERATURE ===== -->
+<section id="temp">
+  <p class="eyebrow reveal">08 — Inference controls</p>
+  <h2 class="title reveal d1">The knobs you'll actually <span class="serif">turn</span></h2>
+  <p class="lead reveal d2">Once a model is trained, you still steer it at runtime. The big one is <strong>temperature</strong> — think of it as the spice level. Low temperature: safe, repeatable, boring. High temperature: creative, surprising, occasionally unhinged. <span class="hl">Drag it.</span></p>
+
+  <div class="demo reveal d2">
+    <div class="demo-h"><h3>Temperature = spice level 🌶️</h3><span class="live">live</span></div>
+    <p class="demo-sub">Same prompt: "name my chai café". Drag the slider and watch the output get wilder.</p>
+    <div class="temp-demo">
+      <div class="temp-readout"><span class="tval" id="tempVal">0.2</span><span class="tmood" id="tempMood">focused &amp; predictable</span></div>
+      <div class="temp-track" id="tempTrack"><div class="temp-thumb" id="tempThumb"></div></div>
+      <div class="temp-scale"><span>0 · robotic</span><span>1 · balanced</span><span>2 · chaos</span></div>
+      <div class="temp-output">
+        <div class="tlabel">model output</div>
+        <div class="tword" id="tempOut">"Chai Break"</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-3 reveal" style="margin-top:32px">
+    <div class="mini-card c1"><span class="mc-tag">temp ≈ 0.2</span><h4>Code &amp; extraction</h4><p>When there's a right answer — SQL, JSON, classification — keep it low. You want repeatable, not creative.</p></div>
+    <div class="mini-card c2"><span class="mc-tag">temp ≈ 0.7</span><h4>Chatbots &amp; copy</h4><p>The natural-sounding default. Enough variation to feel human, enough control to stay on-topic.</p></div>
+    <div class="mini-card c3"><span class="mc-tag">temp ≈ 1.2+</span><h4>Brainstorming</h4><p>When you want fifty wild ideas and will throw away forty-nine. Crank it and let it surprise you.</p></div>
+  </div>
+
+  <div class="lab reveal" data-lab="6"></div>
+</section>
+
+<!-- ===== 08 LIMITS / HALLUCINATION ===== -->
+<section id="limits">
+  <p class="eyebrow reveal">09 — Limits &amp; hallucination</p>
+  <h2 class="title reveal d1">Why it lies with a <span class="serif">straight face</span></h2>
+  <p class="lead reveal d2">A model never says "I don't know" unless it's been taught to. Its only instinct is to produce the <strong>most plausible next token</strong> — and a confident wrong answer is often more plausible-sounding than the truth. <span class="hl">Hallucination isn't a malfunction. It's the same machinery, applied where it has no real knowledge.</span></p>
+
+  <div class="grid-2 reveal d2">
+    <div class="mini-card c3"><span class="mc-tag">why it happens</span><h4>It's optimised for plausible, not true</h4><p>Training rewards text that <em>looks</em> right. When it doesn't know, it fills the gap with something statistically likely — a fake citation, a confident wrong date, an API that doesn't exist.</p></div>
+    <div class="mini-card c4"><span class="mc-tag">what to do</span><h4>Engineer around it</h4><p>Give it the facts in the prompt (retrieval). Ask for sources. Keep temperature low for factual tasks. Verify anything that matters. Never ship raw model output as ground truth.</p></div>
+  </div>
+
+  <div class="demo reveal">
+    <div class="demo-h"><h3>Spot the hallucination</h3></div>
+    <p class="demo-sub">Three statements. One is a confident fabrication of the kind LLMs produce. Click the one you think is made up.</p>
+    <div class="pred-options" id="halluOptions" style="margin-top:8px">
+      <div class="pred-opt" data-correct="false"><span class="word" style="min-width:0">A</span><span style="flex:1;font-family:'Sora';font-size:14px;color:var(--ink)">The Eiffel Tower is in Paris and opened in 1889.</span></div>
+      <div class="pred-opt" data-correct="true"><span class="word" style="min-width:0">B</span><span style="flex:1;font-family:'Sora';font-size:14px;color:var(--ink)">Albert Einstein won the Nobel Prize in 1968 for inventing the light bulb.</span></div>
+      <div class="pred-opt" data-correct="false"><span class="word" style="min-width:0">C</span><span style="flex:1;font-family:'Sora';font-size:14px;color:var(--ink)">Water boils at 100°C at sea level.</span></div>
+    </div>
+    <div class="att-explain" id="halluExplain" style="display:none"></div>
+  </div>
+</section>
+<!-- ===== 09 PROMPTING ===== -->
+<section id="prompt">
+  <p class="eyebrow reveal">10 — Prompt engineering</p>
+  <h2 class="title reveal d1">Talking to the smartest <span class="serif">intern</span> alive</h2>
+  <p class="lead reveal d2">The model is brilliant but has zero context about your world and zero memory of yesterday. Prompt engineering is just <strong>giving good instructions</strong> — the same way you'd brief a sharp intern on day one. Toggle each pattern from lazy to deliberate.</p>
+
+  <div class="demo reveal d2" id="promptDemo">
+    <div class="demo-h"><h3>Four patterns, before &amp; after</h3><span class="live">live</span></div>
+    <p class="demo-sub">Click <b style="color:var(--soft)">vague</b> vs <b style="color:var(--lime)">engineered</b> on each card to see the difference.</p>
+
+    <div style="display:flex;flex-direction:column;gap:18px;margin-top:8px" id="promptCards"></div>
+  </div>
+
+  <div class="grid-2 reveal" style="margin-top:32px">
+    <div class="mini-card c2"><span class="mc-tag">few-shot</span><h4>Show examples</h4><p>Give 2–3 examples of input → output. The model copies the pattern far more reliably than following a description.</p></div>
+    <div class="mini-card c1"><span class="mc-tag">chain-of-thought</span><h4>Ask it to think step by step</h4><p>"Reason through this step by step before answering." Dramatically better on math and logic — it shows its work instead of blurting.</p></div>
+  </div>
+
+  <div class="lab reveal" data-lab="7"></div>
+</section>
+
+<!-- ===== 10 PRODUCTION ===== -->
+<section id="production">
+  <p class="eyebrow reveal">11 — Thinking like an AI engineer</p>
+  <h2 class="title reveal d1">From toy to <span class="serif">production</span></h2>
+  <p class="lead reveal d2">A clever prompt is a demo. A <strong>system</strong> is a product. The engineer's real job starts here: decomposing problems, knowing when <em>not</em> to use an LLM, and watching three numbers — <span class="hl">cost, latency, and quality</span>.</p>
+
+  <!-- RAG pipeline -->
+  <div class="demo reveal d2">
+    <div class="demo-h"><h3>RAG — giving the model your facts</h3><span class="live">live</span></div>
+    <p class="demo-sub">The #1 pattern in real products. Instead of hoping the model knows, you retrieve the right document and hand it over at question time. Play the pipeline.</p>
+    <div class="flow" id="ragFlow">
+      <div class="flow-step" data-i="0"><div class="fs-num">1</div><div class="fs-body"><h4>User asks a question</h4><p>"What's our refund policy for opened items?"</p></div></div>
+      <div class="flow-step" data-i="1"><div class="fs-num">2</div><div class="fs-body"><h4>Search your knowledge base</h4><p>Find the most relevant chunks from your own docs using embeddings.</p></div></div>
+      <div class="flow-step" data-i="2"><div class="fs-num">3</div><div class="fs-body"><h4>Stuff them into the prompt</h4><p>"Using THIS policy text, answer the question." Now the model has the facts.</p></div></div>
+      <div class="flow-step" data-i="3"><div class="fs-num">4</div><div class="fs-body"><h4>Grounded answer</h4><p>Accurate, current, citable — and you control the source of truth.</p></div></div>
+    </div>
+    <div class="flow-controls"><button class="btn" id="ragPlay">▶ Run the pipeline</button><button class="btn ghost" id="ragReset">Reset</button></div>
+  </div>
+
+  <!-- When not to use -->
+  <div class="grid-2 reveal" style="margin-top:32px">
+    <div class="mini-card c4"><span class="mc-tag">✓ reach for an LLM</span><h4>Fuzzy, language-shaped work</h4><p>Summarizing, drafting, classifying messy text, extracting structure from chaos, answering from documents, code assistance. Anywhere "close enough + reviewed" wins.</p></div>
+    <div class="mini-card c3"><span class="mc-tag">✕ don't reach for one</span><h4>When a normal function works</h4><p>Exact math, billing, anything needing a guaranteed identical answer, hard real-time, or where a wrong answer is dangerous and unreviewed. Use real code.</p></div>
+  </div>
+
+  <!-- The three numbers -->
+  <div class="grid-3 reveal" style="margin-top:32px">
+    <div class="mini-card c1"><span class="mc-tag">💰 cost</span><h4>Per token, at scale</h4><p>Cheap per call, terrifying per million. Trim prompts, cache, and pick the smallest model that passes your evals — not the biggest available.</p></div>
+    <div class="mini-card c2"><span class="mc-tag">⚡ latency</span><h4>It generates serially</h4><p>One token at a time. Long outputs feel slow. Stream responses, keep outputs tight, and don't call a giant model when a small one clears the bar.</p></div>
+    <div class="mini-card c3"><span class="mc-tag">✅ quality / evals</span><h4>Vibes don't scale</h4><p>Build a set of 20+ input→expected pairs. Run them on every prompt change. This is unit testing for LLMs — the thing that separates a hobby from a product.</p></div>
+  </div>
+
+  <div class="bigquote reveal">
+    <p>"<em>Vibes don't scale.</em>"</p>
+    <div class="cite">— every AI engineer, eventually</div>
+  </div>
+
+  <div class="lab reveal" data-lab="8"></div>
+</section>
+
+<!-- ===== RECAP ===== -->
+<section id="recap">
+  <p class="eyebrow reveal">Recap</p>
+  <h2 class="title reveal d1">Everything, in one <span class="serif">glance</span></h2>
+  <p class="lead reveal d2">You walked all the way through the machine. Here's the whole map.</p>
+  <div class="recap-grid reveal d2">
+    <div class="recap-item"><span class="ri-icon">🎲</span><div class="ri-body"><strong>Probabilistic, not deterministic</strong><span>Same prompt, different answers — by design.</span></div></div>
+    <div class="recap-item"><span class="ri-icon">⚙️</span><div class="ri-body"><strong>It's just next-token prediction</strong><span>Sophisticated autocomplete, looped.</span></div></div>
+    <div class="recap-item"><span class="ri-icon">🧩</span><div class="ri-body"><strong>Tokens, not words</strong><span>Explains cost, the language tax, and counting fails.</span></div></div>
+    <div class="recap-item"><span class="ri-icon">📍</span><div class="ri-body"><strong>Embeddings = meaning as coordinates</strong><span>Relationships become directions.</span></div></div>
+    <div class="recap-item"><span class="ri-icon">👁️</span><div class="ri-body"><strong>Attention reads context</strong><span>Every token weighs every other token.</span></div></div>
+    <div class="recap-item"><span class="ri-icon">🎓</span><div class="ri-body"><strong>Trained in 3 stages</strong><span>Knowledge → behaviour → values.</span></div></div>
+    <div class="recap-item"><span class="ri-icon">🌶️</span><div class="ri-body"><strong>Temperature steers creativity</strong><span>Low for facts, high for ideas.</span></div></div>
+    <div class="recap-item"><span class="ri-icon">🏗️</span><div class="ri-body"><strong>Production = cost, latency, evals</strong><span>RAG for facts. Vibes don't scale.</span></div></div>
+  </div>
+
+  <div class="stat-strip reveal" style="margin-top:56px">
+    <div class="ss"><div class="v">1</div><div class="l">job: shape the odds</div></div>
+    <div class="ss"><div class="v">3</div><div class="l">numbers that matter</div></div>
+    <div class="ss"><div class="v">∞</div><div class="l">things you can now build</div></div>
+  </div>
+</section>
+
+<footer>
+  <div class="f-mark">Inside the Machine</div>
+  <p>AI for Techies · Session 01 — AI Engineer Mindset &amp; LLMs Deep Dive</p>
+  <p style="margin-top:8px">Next session: build a RAG system, end to end. Bring a laptop.</p>
+  <div class="f-meta">SCROLL BACK ANYTIME · EVERY DEMO IS LIVE</div>
+</footer>
+
+<!-- ===== Three.js (cosmic depth field) ===== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ============================================================
+   PART 1 — WebGL background: scroll-reactive particle cosmos
+   ============================================================ */
+let scene, camera, renderer, starField, tokenCloud, clock;
+let scrollT = 0, mouseX = 0, mouseY = 0;
+let webglOK = true;
+
+function initBG(){
+  const canvas = document.getElementById('bg-canvas');
+  try{
+    renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true, powerPreference:'high-performance'});
+  }catch(e){ webglOK=false; return; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x06070d, 0.018);
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 200);
+  camera.position.set(0,0,32);
+  clock = new THREE.Clock();
+
+  // --- deep star field ---
+  const starCount = 2600;
+  const sGeo = new THREE.BufferGeometry();
+  const sPos = new Float32Array(starCount*3);
+  const sCol = new Float32Array(starCount*3);
+  const palette = [
+    new THREE.Color(0xffb347), new THREE.Color(0x5eead4),
+    new THREE.Color(0xa78bfa), new THREE.Color(0xf472b6),
+    new THREE.Color(0x60a5fa), new THREE.Color(0xf4f1ea)
+  ];
+  for(let i=0;i<starCount;i++){
+    const r = 30 + Math.random()*90;
+    const th = Math.random()*Math.PI*2;
+    const ph = Math.acos(2*Math.random()-1);
+    sPos[i*3]   = r*Math.sin(ph)*Math.cos(th);
+    sPos[i*3+1] = r*Math.sin(ph)*Math.sin(th);
+    sPos[i*3+2] = r*Math.cos(ph) - 20;
+    const c = palette[Math.floor(Math.random()*palette.length)];
+    const dim = 0.4 + Math.random()*0.6;
+    sCol[i*3]=c.r*dim; sCol[i*3+1]=c.g*dim; sCol[i*3+2]=c.b*dim;
+  }
+  sGeo.setAttribute('position', new THREE.BufferAttribute(sPos,3));
+  sGeo.setAttribute('color', new THREE.BufferAttribute(sCol,3));
+  const sMat = new THREE.PointsMaterial({size:0.34, vertexColors:true, transparent:true, opacity:0.55, depthWrite:false, blending:THREE.AdditiveBlending});
+  starField = new THREE.Points(sGeo, sMat);
+  scene.add(starField);
+
+  // --- inner "token" cloud: a structured swirl of brighter points ---
+  const tCount = 900;
+  const tGeo = new THREE.BufferGeometry();
+  const tPos = new Float32Array(tCount*3);
+  const tCol = new Float32Array(tCount*3);
+  for(let i=0;i<tCount;i++){
+    // double-helix-ish swirl to suggest sequence/structure
+    const t = i/tCount;
+    const angle = t*Math.PI*14 + (i%2)*Math.PI;
+    const radius = 6 + Math.sin(t*Math.PI*3)*3;
+    tPos[i*3]   = Math.cos(angle)*radius;
+    tPos[i*3+1] = (t-0.5)*40;
+    tPos[i*3+2] = Math.sin(angle)*radius - 8;
+    const c = palette[i%palette.length];
+    tCol[i*3]=c.r; tCol[i*3+1]=c.g; tCol[i*3+2]=c.b;
+  }
+  tGeo.setAttribute('position', new THREE.BufferAttribute(tPos,3));
+  tGeo.setAttribute('color', new THREE.BufferAttribute(tCol,3));
+  const tMat = new THREE.PointsMaterial({size:0.34, vertexColors:true, transparent:true, opacity:0.0, depthWrite:false, blending:THREE.AdditiveBlending});
+  tokenCloud = new THREE.Points(tGeo, tMat);
+  scene.add(tokenCloud);
+
+  window.addEventListener('resize', onResize);
+  window.addEventListener('mousemove', e=>{
+    mouseX = (e.clientX/window.innerWidth - 0.5);
+    mouseY = (e.clientY/window.innerHeight - 0.5);
+  });
+  animateBG();
+}
+
+function onResize(){
+  if(!webglOK) return;
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animateBG(){
+  if(!webglOK) return;
+  requestAnimationFrame(animateBG);
+  const t = clock.getElapsedTime();
+
+  // scroll drives camera dolly + token cloud reveal
+  const targetZ = 32 - scrollT*22;       // fly inward as you scroll
+  camera.position.z += (targetZ - camera.position.z)*0.05;
+  camera.position.x += (mouseX*4 - camera.position.x)*0.04;
+  camera.position.y += (-mouseY*4 - camera.position.y)*0.04;
+  camera.lookAt(0,0,-8);
+
+  starField.rotation.y = t*0.012;
+  starField.rotation.x = t*0.006;
+
+  tokenCloud.rotation.y = t*0.08;
+  // token cloud fades in during middle of the journey
+  const reveal = Math.sin(Math.min(Math.max(scrollT*1.4,0),1)*Math.PI);
+  tokenCloud.material.opacity += (reveal*0.32 - tokenCloud.material.opacity)*0.05;
+
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('scroll', ()=>{
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  scrollT = max>0 ? window.scrollY/max : 0;
+  document.getElementById('progress-rail').style.width = (scrollT*100)+'%';
+});
+
+/* ============================================================
+   PART 2 — Embeddings: small interactive 3D vector space
+   ============================================================ */
+let vScene, vCam, vRenderer, vGroup, vRaf;
+let vDrag=false, vpx=0, vpy=0, vRotX=0.3, vRotY=0.5, vZoom=14;
+const vWords = [
+  {t:'King',  p:[ 3, 2.5, 0], c:0x60a5fa},
+  {t:'Man',   p:[ 3,-2.5, 0], c:0xf472b6},
+  {t:'Woman', p:[-3,-2.5, 0], c:0xa78bfa},
+  {t:'Queen', p:[-3, 2.5, 0], c:0xffb347, hidden:true},
+  {t:'Prince',p:[ 4.5,1.2,2], c:0x60a5fa},
+  {t:'Cat',   p:[-1,-4,  4], c:0x5eead4},
+  {t:'Dog',   p:[ 0,-4.4, 4.5], c:0x5eead4},
+  {t:'Paris', p:[ 5,-1, -3], c:0xbef264},
+  {t:'France',p:[ 6, 0.5,-3.5], c:0xbef264},
+];
+let vSprites=[];
+
+function makeLabel(text, color){
+  const cv = document.createElement('canvas');
+  cv.width=256; cv.height=64;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#'+color.toString(16).padStart(6,'0');
+  ctx.font = 'bold 38px "Space Grotesk", sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, 128, 34);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.needsUpdate=true;
+  const mat = new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false});
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(3.2,0.8,1);
+  return sp;
+}
+
+function initVec(){
+  const canvas = document.getElementById('vecCanvas');
+  if(!canvas || !webglOK) return;
+  const wrap = canvas.parentElement;
+  vRenderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+  vRenderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  vRenderer.setSize(wrap.clientWidth, wrap.clientHeight);
+  vScene = new THREE.Scene();
+  vCam = new THREE.PerspectiveCamera(50, wrap.clientWidth/wrap.clientHeight, 0.1, 100);
+  vGroup = new THREE.Group();
+  vScene.add(vGroup);
+
+  // axes glow lines
+  const axMat = new THREE.LineBasicMaterial({color:0x2a2f48, transparent:true, opacity:0.6});
+  [[0,1,0],[1,0,0],[0,0,1]].forEach(d=>{
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-8*d[0],-8*d[1],-8*d[2]), new THREE.Vector3(8*d[0],8*d[1],8*d[2])
+    ]);
+    vGroup.add(new THREE.Line(g, axMat));
+  });
+
+  vWords.forEach((w,i)=>{
+    const geo = new THREE.SphereGeometry(0.28,16,16);
+    const mat = new THREE.MeshBasicMaterial({color:w.c});
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(...w.p);
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.5,16,16), new THREE.MeshBasicMaterial({color:w.c, transparent:true, opacity:0.18}));
+    halo.position.set(...w.p);
+    const lbl = makeLabel(w.t, w.c);
+    lbl.position.set(w.p[0], w.p[1]+0.7, w.p[2]);
+    if(w.hidden){ m.visible=false; halo.visible=false; lbl.visible=false; }
+    vGroup.add(m); vGroup.add(halo); vGroup.add(lbl);
+    vSprites.push({mesh:m, halo, lbl, hidden:!!w.hidden});
+  });
+
+  // pointer controls
+  canvas.style.pointerEvents='auto';
+  canvas.addEventListener('mousedown',e=>{vDrag=true;vpx=e.clientX;vpy=e.clientY});
+  window.addEventListener('mouseup',()=>vDrag=false);
+  window.addEventListener('mousemove',e=>{
+    if(!vDrag) return;
+    vRotY += (e.clientX-vpx)*0.008;
+    vRotX += (e.clientY-vpy)*0.008;
+    vpx=e.clientX; vpy=e.clientY;
+  });
+  canvas.addEventListener('wheel',e=>{e.preventDefault();vZoom=Math.max(7,Math.min(26,vZoom+e.deltaY*0.01))},{passive:false});
+  canvas.addEventListener('touchstart',e=>{vDrag=true;vpx=e.touches[0].clientX;vpy=e.touches[0].clientY},{passive:true});
+  window.addEventListener('touchend',()=>vDrag=false);
+  window.addEventListener('touchmove',e=>{
+    if(!vDrag)return;
+    vRotY += (e.touches[0].clientX-vpx)*0.008;
+    vRotX += (e.touches[0].clientY-vpy)*0.008;
+    vpx=e.touches[0].clientX; vpy=e.touches[0].clientY;
+  },{passive:true});
+
+  animateVec();
+  // keep vec canvas sized
+  window.addEventListener('resize',()=>{
+    if(!vRenderer) return;
+    vRenderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    vCam.aspect = wrap.clientWidth/wrap.clientHeight;
+    vCam.updateProjectionMatrix();
+  });
+}
+function animateVec(){
+  vRaf = requestAnimationFrame(animateVec);
+  if(!vDrag) vRotY += 0.0025;
+  vGroup.rotation.x = vRotX;
+  vGroup.rotation.y = vRotY;
+  vCam.position.set(0,0,vZoom);
+  vCam.lookAt(0,0,0);
+  vRenderer.render(vScene, vCam);
+}
+function revealQueen(){
+  const q = vSprites.find((s,i)=>vWords[i].t==='Queen');
+  if(q){ q.mesh.visible=true; q.halo.visible=true; q.lbl.visible=true; }
+}
+
+/* ============================================================
+   PART 2b — 3D Transformer tower (orbitable)
+   ============================================================ */
+let tfScene, tfCam, tfRenderer, tfGroup, tfRaf;
+let tfDrag=false, tfpx=0, tfpy=0, tfRotX=0.12, tfRotY=0.55, tfZoom=20, tfAutoSpin=true;
+let tfPulse=[]; // {mesh, baseColor, t}
+function initTF3D(){
+  const canvas=document.getElementById('tfCanvas');
+  if(!canvas||!webglOK) return;
+  const wrap=canvas.parentElement;
+  tfRenderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+  tfRenderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  tfRenderer.setSize(wrap.clientWidth,wrap.clientHeight);
+  tfScene=new THREE.Scene();
+  tfCam=new THREE.PerspectiveCamera(48,wrap.clientWidth/wrap.clientHeight,0.1,100);
+  tfGroup=new THREE.Group();
+  tfScene.add(tfGroup);
+
+  const C_ENC=0x5eead4, C_DEC=0xf472b6, C_ATT=0xffb347, C_FF=0xbef264;
+  const nLayers=4, layerH=1.5, gap=0.55, colDX=3.4;
+  const totalH=nLayers*(layerH+gap)-gap;
+  const y0=-totalH/2;
+
+  function slab(x,y,w,h,d,color,op){
+    const g=new THREE.BoxGeometry(w,h,d);
+    const m=new THREE.MeshBasicMaterial({color,transparent:true,opacity:op});
+    const mesh=new THREE.Mesh(g,m); mesh.position.set(x,y,0);
+    tfGroup.add(mesh);
+    // wire edges for crispness
+    const edges=new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color,transparent:true,opacity:0.55}));
+    edges.position.set(x,y,0); tfGroup.add(edges);
+    return mesh;
+  }
+
+  // build encoder stack (left) and decoder stack (right)
+  for(let i=0;i<nLayers;i++){
+    const y=y0+i*(layerH+gap)+layerH/2;
+    // encoder layer shell
+    slab(-colDX, y, 2.6, layerH, 1.6, C_ENC, 0.12);
+    // encoder sublayers: attention (bottom) + ff (top)
+    const encAtt=slab(-colDX, y-0.32, 2.2, 0.5, 1.3, C_ATT, 0.35);
+    const encFF =slab(-colDX, y+0.32, 2.2, 0.5, 1.3, C_FF, 0.35);
+    tfPulse.push({mesh:encAtt,base:C_ATT,side:'enc',layer:i,sub:0});
+    tfPulse.push({mesh:encFF,base:C_FF,side:'enc',layer:i,sub:1});
+
+    // decoder layer shell
+    slab(colDX, y, 2.6, layerH, 1.6, C_DEC, 0.12);
+    // decoder sublayers: masked-attn, cross-attn, ff (thinner)
+    const dMask=slab(colDX, y-0.40, 2.2, 0.32, 1.3, C_ATT, 0.32);
+    const dCross=slab(colDX, y, 2.2, 0.32, 1.3, 0x60a5fa, 0.32);
+    const dFF =slab(colDX, y+0.40, 2.2, 0.32, 1.3, C_FF, 0.32);
+    tfPulse.push({mesh:dMask,base:C_ATT,side:'dec',layer:i,sub:0});
+    tfPulse.push({mesh:dCross,base:0x60a5fa,side:'dec',layer:i,sub:1});
+    tfPulse.push({mesh:dFF,base:C_FF,side:'dec',layer:i,sub:2});
+  }
+
+  // arrow from encoder top to decoder (cross-attention link)
+  const linkMat=new THREE.LineBasicMaterial({color:0x60a5fa,transparent:true,opacity:0.4});
+  const linkGeo=new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-colDX+1.3, totalH/2-0.4, 0), new THREE.Vector3(colDX-1.3, 0.0, 0)
+  ]);
+  tfGroup.add(new THREE.Line(linkGeo,linkMat));
+
+  // floating input tokens (bottom) and output tokens (top-right)
+  function tokenSprite(text,x,y,color){
+    const cv=document.createElement('canvas'); cv.width=128;cv.height=64;
+    const ctx=cv.getContext('2d'); ctx.fillStyle='#'+color.toString(16).padStart(6,'0');
+    ctx.font='bold 30px "JetBrains Mono",monospace'; ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(text,64,34);
+    const tex=new THREE.CanvasTexture(cv);
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false}));
+    sp.scale.set(1.6,0.8,1); sp.position.set(x,y,0.9); tfGroup.add(sp); return sp;
+  }
+  tokenSprite('I',-colDX-0.7, y0-0.7, 0x5eead4);
+  tokenSprite('love',-colDX, y0-0.7, 0x5eead4);
+  tokenSprite('chai',-colDX+0.7, y0-0.7, 0x5eead4);
+  tokenSprite('चाय',colDX, totalH/2+0.7, 0xf472b6);
+
+  // controls
+  canvas.style.pointerEvents='auto';
+  canvas.addEventListener('mousedown',e=>{tfDrag=true;tfpx=e.clientX;tfpy=e.clientY;});
+  window.addEventListener('mouseup',()=>tfDrag=false);
+  window.addEventListener('mousemove',e=>{ if(!tfDrag)return; tfRotY+=(e.clientX-tfpx)*0.008; tfRotX+=(e.clientY-tfpy)*0.008; tfRotX=Math.max(-0.6,Math.min(0.6,tfRotX)); tfpx=e.clientX;tfpy=e.clientY; });
+  canvas.addEventListener('wheel',e=>{e.preventDefault();tfZoom=Math.max(12,Math.min(34,tfZoom+e.deltaY*0.01));},{passive:false});
+  canvas.addEventListener('touchstart',e=>{tfDrag=true;tfpx=e.touches[0].clientX;tfpy=e.touches[0].clientY;},{passive:true});
+  window.addEventListener('touchend',()=>tfDrag=false);
+  window.addEventListener('touchmove',e=>{ if(!tfDrag)return; tfRotY+=(e.touches[0].clientX-tfpx)*0.008; tfRotX+=(e.touches[0].clientY-tfpy)*0.008; tfpx=e.touches[0].clientX;tfpy=e.touches[0].clientY; },{passive:true});
+  window.addEventListener('resize',()=>{ if(!tfRenderer)return; tfRenderer.setSize(wrap.clientWidth,wrap.clientHeight); tfCam.aspect=wrap.clientWidth/wrap.clientHeight; tfCam.updateProjectionMatrix(); });
+
+  animateTF3D();
+
+  // pulse animation: light each sublayer in sequence climbing the tower
+  let pulseSeq=null;
+  document.getElementById('tf3dFlow').addEventListener('click',()=>{
+    if(pulseSeq) clearTimeout(pulseSeq);
+    const order=[...tfPulse].sort((a,b)=> a.side===b.side ? (a.layer-b.layer)||(a.sub-b.sub) : (a.side==='enc'?-1:1));
+    order.forEach(p=>p.flash=0);
+    let i=0;
+    const step=()=>{ if(i>0) order[i-1].flash=0; if(i<order.length){ order[i].flash=1; i++; pulseSeq=setTimeout(step,160);} };
+    step();
+  });
+  document.getElementById('tf3dSpin').addEventListener('click',()=>{ tfAutoSpin=!tfAutoSpin; });
+}
+function animateTF3D(){
+  tfRaf=requestAnimationFrame(animateTF3D);
+  if(tfAutoSpin && !tfDrag) tfRotY+=0.0035;
+  tfGroup.rotation.x=tfRotX; tfGroup.rotation.y=tfRotY;
+  tfCam.position.set(0,0,tfZoom); tfCam.lookAt(0,0,0);
+  // apply flashes
+  tfPulse.forEach(p=>{
+    const target=p.flash?0.95:(p.sub!==undefined?0.33:0.33);
+    p.mesh.material.opacity += (target - p.mesh.material.opacity)*0.2;
+    const s=p.flash?1.12:1.0;
+    p.mesh.scale.x += (s-p.mesh.scale.x)*0.2;
+    p.mesh.scale.z += (s-p.mesh.scale.z)*0.2;
+  });
+  tfRenderer.render(tfScene,tfCam);
+}
+
+
+/* ---- Reveal on scroll ---- */
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(en=>{ if(en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } });
+},{threshold:0.12, rootMargin:'0px 0px -8% 0px'});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+/* ---- Nav active state ---- */
+const navLinks = [...document.querySelectorAll('#nav a')];
+const sections = navLinks.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const navIO = new IntersectionObserver((entries)=>{
+  entries.forEach(en=>{
+    if(en.isIntersecting){
+      const id = '#'+en.target.id;
+      navLinks.forEach(a=>a.classList.toggle('active', a.getAttribute('href')===id));
+    }
+  });
+},{threshold:0.4});
+sections.forEach(s=>navIO.observe(s));
+
+/* ---- Sound toggle (gentle ambient drone via WebAudio) ---- */
+let audioCtx=null, droneNodes=null, soundOn=false;
+const soundBtn = document.getElementById('sound-toggle');
+function startDrone(){
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  const master = audioCtx.createGain();
+  master.gain.value = 0.0; master.connect(audioCtx.destination);
+  const freqs=[110,164.81,220];
+  const oscs = freqs.map(f=>{
+    const o=audioCtx.createOscillator(); o.type='sine'; o.frequency.value=f;
+    const g=audioCtx.createGain(); g.gain.value=0.16;
+    o.connect(g); g.connect(master); o.start();
+    return o;
+  });
+  // slow shimmer
+  const lfo=audioCtx.createOscillator(); lfo.frequency.value=0.07;
+  const lfoG=audioCtx.createGain(); lfoG.gain.value=6;
+  lfo.connect(lfoG); lfoG.connect(oscs[2].frequency); lfo.start();
+  master.gain.linearRampToValueAtTime(0.05, audioCtx.currentTime+2);
+  droneNodes={master};
+}
+soundBtn.addEventListener('click',()=>{
+  soundOn=!soundOn;
+  soundBtn.classList.toggle('muted',!soundOn);
+  if(soundOn){ if(!audioCtx) startDrone(); else { audioCtx.resume(); droneNodes.master.gain.linearRampToValueAtTime(0.05,audioCtx.currentTime+1);} }
+  else if(droneNodes){ droneNodes.master.gain.linearRampToValueAtTime(0.0,audioCtx.currentTime+0.6); }
+});
+
+/* ---- Tokenizer ---- */
+function fakeTokenize(text){
+  const map={
+    'unbelievable':['un','believ','able'],
+    'tokenization':['token','ization'],
+    'antidisestablishmentarianism':['anti','dis','establish','ment','arian','ism'],
+    'hello world':['hello',' world'],
+    'मुझे चाय बहुत पसंद है':['म','ुझ','े',' च','ाय',' बह','ुत',' प','स','ंद',' ह','ै']
+  };
+  const lower=text.toLowerCase().trim();
+  if(map[lower]) return map[lower];
+  const out=[]; const parts=text.match(/\S+|\s+/g)||[]; let first=true;
+  parts.forEach((part,idx)=>{
+    if(/^\s+$/.test(part)) return;
+    const prev=idx>0?parts[idx-1]:''; const prefix=(/^\s/.test(prev)||(idx>0&&!first))?' ':''; first=false;
+    if(part.length<=6){ out.push(prefix+part); }
+    else{ let s=part; let f2=true; while(s.length>0){ const len=Math.min(s.length,Math.max(3,Math.floor(s.length/2.2))); out.push((f2?prefix:'')+s.slice(0,len)); s=s.slice(len); f2=false; } }
+  });
+  return out;
+}
+const tokenInput=document.getElementById('tokenInput');
+const tokenDisplay=document.getElementById('tokenDisplay');
+function renderTokens(){
+  const text=tokenInput.value; const toks=fakeTokenize(text);
+  tokenDisplay.innerHTML='';
+  toks.forEach((t,i)=>{ const c=document.createElement('span'); c.className='token-chip'; c.style.animationDelay=(i*0.04)+'s'; c.textContent=t.replace(/^ /,'·'); tokenDisplay.appendChild(c); });
+  document.getElementById('charCount').textContent=text.length;
+  document.getElementById('tokenCount').textContent=toks.length;
+  document.getElementById('ratioVal').textContent=toks.length>0?(text.length/toks.length).toFixed(1):'—';
+}
+tokenInput.addEventListener('input',renderTokens);
+document.querySelectorAll('.token-preset').forEach(p=>p.addEventListener('click',()=>{tokenInput.value=p.dataset.text;renderTokens();}));
+renderTokens();
+
+/* ---- Next-token predictor ---- */
+const predStates={
+  'The capital of France is':[{w:'Paris',p:94,top:true},{w:'located',p:3},{w:'a',p:2},{w:'home',p:1}],
+  'The capital of France is Paris':[{w:'.',p:71,top:true},{w:',',p:18},{w:'and',p:7},{w:'which',p:4}],
+  'The capital of France is Paris.':[{w:'It',p:52,top:true},{w:'The',p:24},{w:'Paris',p:14},{w:'France',p:10}],
+  'The capital of France is Paris. It':[{w:'is',p:68,top:true},{w:'has',p:17},{w:'was',p:9},{w:'sits',p:6}],
+  'The capital of France is Paris. It is':[{w:'famous',p:44,top:true},{w:'home',p:31},{w:'a',p:15},{w:'known',p:10}],
+};
+const builtText=document.getElementById('builtText');
+const predOptions=document.getElementById('predOptions');
+function renderPred(){
+  const key=builtText.textContent.trim();
+  const opts=predStates[key];
+  predOptions.innerHTML='';
+  if(!opts){ predOptions.innerHTML='<p style="color:var(--soft);font-family:JetBrains Mono;font-size:13px">— sequence complete · hit reset to run again —</p>'; return; }
+  opts.forEach(o=>{
+    const row=document.createElement('div'); row.className='pred-opt'+(o.top?'':' dim');
+    row.innerHTML=`<span class="word">${o.w}</span><span class="bar-wrap"><span class="bar"></span></span><span class="pct">${o.p}%</span>`;
+    row.addEventListener('click',()=>{
+      const add=(o.w==='.'||o.w===',')?o.w:(builtText.textContent.endsWith('.')?' '+o.w:' '+o.w);
+      builtText.textContent = builtText.textContent + add;
+      renderPred();
+    });
+    predOptions.appendChild(row);
+    requestAnimationFrame(()=>{ row.querySelector('.bar').style.width=o.p+'%'; });
+  });
+}
+document.getElementById('predReset').addEventListener('click',()=>{builtText.textContent='The capital of France is';renderPred();});
+document.getElementById('predAuto').addEventListener('click',()=>{
+  const step=()=>{ const key=builtText.textContent.trim(); const opts=predStates[key]; if(!opts) return; const top=opts.find(o=>o.top); const add=(top.w==='.'||top.w===',')?top.w:' '+top.w; builtText.textContent+=add; renderPred(); setTimeout(step,750); };
+  step();
+});
+renderPred();
+
+/* ---- Deterministic vs probabilistic randomizer ---- */
+document.getElementById('detRun').addEventListener('click',()=>{ /* deterministic: nothing changes — that's the joke */
+  const btn=document.getElementById('detRun'); btn.textContent='…still 5 😏'; setTimeout(()=>btn.textContent='Run again',1100);
+});
+const cafeNames=['"Chai Theory"','"DeskBrew"','"The Steam Room"','"Cardamom & Co."','"Monsoon Mug"','"Adrak Atelier"','"Cutting Chai Club"','"Brewtiful"','"Tapri Tales"','"Steep Street"'];
+document.getElementById('probRun').addEventListener('click',()=>{
+  ['pv1','pv2','pv3'].forEach(id=>{ const el=document.getElementById(id); el.style.opacity=0; setTimeout(()=>{ el.textContent=cafeNames[Math.floor(Math.random()*cafeNames.length)]; el.style.opacity=1; },180); });
+});
+
+/* ---- Attention ---- */
+const attBtns=document.querySelectorAll('.att-toggle button');
+const attAdj=document.getElementById('attAdj');
+const attExplain=document.getElementById('attExplain');
+const aTrophy=document.querySelector('.a-trophy');
+const aSuitcase=document.querySelector('.a-suitcase');
+function setAtt(v){
+  if(v==='big'){ attAdj.textContent='big.'; aTrophy.className='att-word a-trophy att-strong'; aSuitcase.className='att-word a-suitcase att-weak'; attExplain.textContent='"it" → trophy   ·   a big trophy is what won\'t fit'; }
+  else{ attAdj.textContent='small.'; aSuitcase.className='att-word a-suitcase att-strong'; aTrophy.className='att-word a-trophy att-weak'; attExplain.textContent='"it" → suitcase   ·   a small suitcase is the reason it won\'t fit'; }
+}
+attBtns.forEach(b=>b.addEventListener('click',()=>{attBtns.forEach(x=>x.classList.remove('active'));b.classList.add('active');setAtt(b.dataset.v);}));
+setAtt('big');
+
+/* ---- Temperature ---- */
+const tempThumb=document.getElementById('tempThumb');
+const tempTrack=document.getElementById('tempTrack');
+const buckets=[
+  {max:.14,val:'0.0',mood:'robotic · deterministic',out:'"Chai Co."'},
+  {max:.32,val:'0.2',mood:'focused & predictable',out:'"Chai Break"'},
+  {max:.52,val:'0.5',mood:'balanced, a little playful',out:'"DeskBrew"'},
+  {max:.72,val:'0.7',mood:'natural & balanced',out:'"Monsoon Mug Club"'},
+  {max:.88,val:'1.0',mood:'creative & varied',out:'"Steamy Solutions"'},
+  {max:.97,val:'1.5',mood:'wild & adventurous',out:'"Cardamom Cartel"'},
+  {max:1.01,val:'2.0',mood:'chaos — anything goes',out:'"Vortex of Velvet Steam"'},
+];
+let tDrag=false;
+function setTemp(clientX){
+  const r=tempTrack.getBoundingClientRect(); let pct=(clientX-r.left)/r.width; pct=Math.max(0,Math.min(1,pct));
+  tempThumb.style.left=(pct*100)+'%';
+  const b=buckets.find(x=>pct<=x.max)||buckets[buckets.length-1];
+  document.getElementById('tempVal').textContent=b.val;
+  document.getElementById('tempMood').textContent=b.mood;
+  const out=document.getElementById('tempOut'); out.style.opacity=0; setTimeout(()=>{out.textContent=b.out;out.style.opacity=1;},120);
+}
+tempTrack.addEventListener('mousedown',e=>{tDrag=true;setTemp(e.clientX);});
+document.addEventListener('mousemove',e=>{if(tDrag)setTemp(e.clientX);});
+document.addEventListener('mouseup',()=>tDrag=false);
+tempTrack.addEventListener('touchstart',e=>{tDrag=true;setTemp(e.touches[0].clientX);},{passive:true});
+document.addEventListener('touchmove',e=>{if(tDrag)setTemp(e.touches[0].clientX);},{passive:true});
+document.addEventListener('touchend',()=>tDrag=false);
+setTimeout(()=>{const r=tempTrack.getBoundingClientRect();setTemp(r.left+r.width*0.22);},200);
+
+/* ---- Flow players (training + RAG) ---- */
+function wireFlow(flowId, playId, resetId){
+  const steps=document.querySelectorAll('#'+flowId+' .flow-step');
+  const play=document.getElementById(playId), reset=document.getElementById(resetId);
+  function run(){ steps.forEach(s=>s.classList.remove('active')); steps.forEach((s,i)=>setTimeout(()=>s.classList.add('active'),i*850)); }
+  play.addEventListener('click',run);
+  reset.addEventListener('click',()=>steps.forEach(s=>s.classList.remove('active')));
+  steps.forEach(s=>s.addEventListener('click',()=>s.classList.toggle('active')));
+}
+wireFlow('trainFlow','trainPlay','trainReset');
+wireFlow('ragFlow','ragPlay','ragReset');
+
+/* ---- Transformer assembly line ---- */
+(function(){
+  const track=document.getElementById('tfTrack'); if(!track) return;
+  const blocks=[...track.querySelectorAll('.tf-block')];
+  const arrows=[...track.querySelectorAll('.tf-arrow')];
+  const readoutText=document.getElementById('tfReadoutText');
+  const lines=[
+    '📥 “I love chai” enters the machine as plain text.',
+    '🔢 Each word becomes a token, then a list of numbers (its embedding).',
+    '🧠 The ENCODER reads all of it at once — attention links every word to build full meaning.',
+    '✍️ The DECODER starts writing the Hindi, one word at a time, looking back at the meaning.',
+    '📤 Out comes “मुझे चाय पसंद है.” That’s a transformer, start to finish.'
+  ];
+  let timers=[];
+  function clearAll(){ timers.forEach(clearTimeout); timers=[]; blocks.forEach(b=>b.classList.remove('lit')); arrows.forEach(a=>a.classList.remove('lit')); }
+  function play(){
+    clearAll();
+    blocks.forEach((b,i)=>{
+      timers.push(setTimeout(()=>{
+        b.classList.add('lit');
+        readoutText.textContent=lines[i];
+        if(i>0&&arrows[i-1]) arrows[i-1].classList.add('lit');
+      }, i*1100));
+    });
+  }
+  document.getElementById('tfPlay').addEventListener('click',play);
+  document.getElementById('tfReset').addEventListener('click',()=>{ clearAll(); readoutText.textContent='Press play to send the sentence through the machine.'; });
+  blocks.forEach((b,i)=>b.addEventListener('click',()=>{ b.classList.toggle('lit'); readoutText.textContent=lines[i]; }));
+})();
+
+/* ---- Layer-climb diagram ---- */
+(function(){
+  const encSubs=[...document.querySelectorAll('.layer-col.enc .sublayer')];
+  const decSubs=[...document.querySelectorAll('.layer-col.dec .sublayer')];
+  if(!encSubs.length) return;
+  let timers=[];
+  function clearAll(){ timers.forEach(clearTimeout); timers=[]; [...encSubs,...decSubs].forEach(s=>s.classList.remove('lit')); }
+  function play(){
+    clearAll();
+    // climb encoder then decoder in parallel-ish staggered reveal
+    encSubs.forEach((s,i)=>timers.push(setTimeout(()=>s.classList.add('lit'), i*700)));
+    decSubs.forEach((s,i)=>timers.push(setTimeout(()=>s.classList.add('lit'), i*700+350)));
+  }
+  document.getElementById('layerPlay').addEventListener('click',play);
+  document.getElementById('layerReset').addEventListener('click',clearAll);
+  [...encSubs,...decSubs].forEach(s=>s.addEventListener('click',()=>s.classList.toggle('lit')));
+})();
+
+/* ---- Decoder typewriter demo ---- */
+(function(){
+  const out=document.getElementById('twOut'); if(!out) return;
+  const count=document.getElementById('twCount');
+  const tokens=["\"Steam","ed",".","Steep","ed",".","Sort","ed","."];
+  let timer=null;
+  function play(){
+    if(timer) clearInterval(timer);
+    out.innerHTML=''; let i=0; count.textContent='0 tokens';
+    timer=setInterval(()=>{
+      if(i>=tokens.length){ clearInterval(timer); return; }
+      const span=document.createElement('span');
+      span.className='tw-token'; span.textContent=tokens[i];
+      out.appendChild(span);
+      count.textContent=(i+1)+' token'+(i===0?'':'s');
+      i++;
+    },360);
+  }
+  document.getElementById('twPlay').addEventListener('click',play);
+  document.getElementById('twReset').addEventListener('click',()=>{ if(timer)clearInterval(timer); out.innerHTML=''; count.textContent='0 tokens'; });
+})();
+
+/* ---- Interactive Hands-on Labs ---- */
+const LAB_DATA = {
+  1:{ title:"Make the machine contradict itself", color:"amber",
+    sub:"Prove to yourself that the same question can give different answers — live.",
+    meta:["👤 SOLO","⏱ 3 MIN","🔥 EASY"],
+    launches:[{label:"Open ChatGPT",url:"https://chatgpt.com",primary:true},{label:"Open Gemini",url:"https://gemini.google.com"},{label:"Open Claude",url:"https://claude.ai"}],
+    prompt:"Give me one creative name for a chai café. Reply with just the name, nothing else.",
+    steps:[
+      "Open any AI above and paste the prompt (use the copy button).",
+      "Send the <em>exact same</em> message <em>three times</em> in a row.",
+      "Watch the names drift — note your favourite.",
+      "Now ask <code>What is 17 × 4?</code> three times. Notice what <em>doesn't</em> change, and ask why."
+    ],
+    done:"You just watched probability in action — creative tasks wander, factual ones lock in." },
+  2:{ title:"Beat the autocomplete", color:"cyan",
+    sub:"Race the model: can the room guess the next word before it does?",
+    meta:["👥 WHOLE ROOM","⏱ 2 MIN","🔊 OUT LOUD"],
+    launches:[{label:"Use the predictor above ↑",url:"#what",primary:true}],
+    prompt:"The capital of France is",
+    steps:[
+      "Look at the half-sentence in the predictor demo above.",
+      "Everyone shouts the word they think comes next.",
+      "Reveal the model's ranked guesses — did the room match the top pick?",
+      "Realise: your brain just did the same next-word bet the model does."
+    ],
+    done:"Your brain is a next-token predictor too — that's why this feels so natural." },
+  3:{ title:"Find the hidden “language tax”", color:"violet",
+    sub:"See how much more non-English text costs the model — in real numbers.",
+    meta:["👥 PAIRS","⏱ 4 MIN","🧮 COMPARE"],
+    launches:[{label:"Open the Tokenizer",url:"https://platform.openai.com/tokenizer",primary:true},{label:"Use the demo above ↑",url:"#tokens"}],
+    prompt:"I love chai very much",
+    steps:[
+      "Open the official tokenizer and paste an English sentence. Note the token count.",
+      "Now paste the same meaning in Hindi: <code>मुझे चाय बहुत पसंद है</code>.",
+      "Compare the two counts — the Hindi version usually costs far more.",
+      "Discuss: if your product serves Indian languages, what does that do to your bill?"
+    ],
+    done:"Same meaning, more tokens = more cost & latency. That's the language tax." },
+  4:{ title:"Bend a sentence with context", color:"blue",
+    sub:"Feed the model new words and watch attention re-wire the meaning in real time.",
+    meta:["👤 SOLO","⏱ 3 MIN","🔬 EXPERIMENT"],
+    launches:[{label:"Open ChatGPT",url:"https://chatgpt.com",primary:true},{label:"Open Gemini",url:"https://gemini.google.com"}],
+    prompt:"In the sentence “I saw the man with the telescope,” who has the telescope?",
+    steps:[
+      "Ask the question above and read the model's answer.",
+      "Then add: <em>“I was standing on my balcony looking through it.”</em> Ask again.",
+      "Watch the answer flip as the new words pull attention a different way.",
+      "That shift <em>is</em> attention re-weighting, happening in front of you."
+    ],
+    done:"Context changed which words “mattered” — that's attention, live." },
+  5:{ title:"Tell encoder from decoder", color:"pink",
+    sub:"Spot the two halves of the transformer in tools you already use.",
+    meta:["👥 PAIRS","⏱ 3 MIN","🧩 MATCH"],
+    launches:[{label:"Replay the machine above ↑",url:"#transformer",primary:true}],
+    prompt:"Is this tool mostly UNDERSTANDING input, or GENERATING output?",
+    steps:[
+      "Replay the assembly line above — note where “understand” ends and “write” begins.",
+      "In pairs, list 3 AI tools you use (search, chatbot, translator, autocomplete…).",
+      "For each, decide: is it mostly <b>encoder</b> (understanding) or <b>decoder</b> (generating)?",
+      "Share one with the room and say why."
+    ],
+    done:"Search leans encoder; chat & writing lean decoder. GPT is a giant decoder." },
+  6:{ title:"Turn the temperature knob for real", color:"amber",
+    sub:"Feel the difference between a safe model and a wild one in a live playground.",
+    meta:["👤 SOLO","⏱ 4 MIN","🎛️ FREE TOOL"],
+    launches:[{label:"Open Google AI Studio",url:"https://aistudio.google.com",primary:true},{label:"Use the slider above ↑",url:"#temp"}],
+    prompt:"Write a one-line tagline for a chai café.",
+    steps:[
+      "Open AI Studio (free). Find the <b>Temperature</b> slider on the right.",
+      "Set temperature to <code>0</code>. Run the prompt 3 times — barely moves.",
+      "Set temperature to <code>1.5</code>. Run 3 more times — a new café each time.",
+      "Decide: which temperature would you actually ship to customers?"
+    ],
+    done:"Low temp = safe & repeatable. High temp = creative & risky. You felt the dial." },
+  7:{ title:"Rescue a terrible prompt", color:"lime",
+    sub:"Take a lazy prompt and engineer it into something genuinely useful.",
+    meta:["👥 PAIRS","⏱ 5 MIN","✍️ REWRITE"],
+    launches:[{label:"Open ChatGPT",url:"https://chatgpt.com",primary:true},{label:"Open Claude",url:"https://claude.ai"}],
+    prompt:"You are a helpful editor. Summarise the text below in exactly 3 bullet points, each under 15 words, in a neutral tone.\n\n[paste any article here]",
+    steps:[
+      "First try the lazy version: <code>summarise this</code> + any article. Note the messy result.",
+      "Now copy the engineered prompt above and run it on the same article.",
+      "Compare side by side — the second is sharper and actually usable.",
+      "Bonus: add two example summaries (few-shot) and watch it get even more consistent."
+    ],
+    done:"Role + format + examples turned a vague ask into a reliable tool." },
+  8:{ title:"Build your first tiny eval set", color:"cyan",
+    sub:"The capstone: do the thing that separates a hobby from a real product.",
+    meta:["👤 SOLO OR PAIRS","⏱ 5 MIN","🎯 TAKE TO WORK"],
+    launches:[{label:"Open ChatGPT",url:"https://chatgpt.com",primary:true},{label:"Open a notes app",url:"https://keep.google.com"}],
+    prompt:"Classify each message as: BILLING, TECHNICAL, or OTHER. Reply with only the label.\n\nMessage: \"My card was charged twice this month.\"",
+    steps:[
+      "Pick a real repeatable task from your job (classify a ticket, extract a date…).",
+      "Write down <b>5 inputs</b> and the answer you'd accept for each — that's your eval set.",
+      "Write one prompt (start from the example above). Run all 5. Score how many passed.",
+      "Tweak the prompt <em>once</em>, re-run all 5. Did your score go up? That's the job."
+    ],
+    done:"You just built an eval — the muscle that turns prompting into engineering." }
+};
+const CHECK_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="#1a1206" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+const totalLabs=Object.keys(LAB_DATA).length;
+function renderLab(el){
+  const id=el.dataset.lab; const d=LAB_DATA[id]; if(!d) return;
+  const acc='var(--'+d.color+')';
+  const launchHTML=d.launches.map(l=>{
+    const cls=l.primary?'lab-btn primary':'lab-btn alt';
+    const ext=l.url.startsWith('#')?'':'<span class="ext">↗</span>';
+    const target=l.url.startsWith('#')?'':' target="_blank" rel="noopener"';
+    return `<a class="${cls}" href="${l.url}"${target}>${l.label} ${ext}</a>`;
+  }).join('');
+  const metaHTML=d.meta.map((m,i)=>`<span class="pill${i===d.meta.length-1?' go':''}">${m}</span>`).join('');
+  const stepsHTML=d.steps.map((s,i)=>`<li class="lab-step" data-s="${i}"><span class="box">${CHECK_SVG}</span><span class="st-text">${s}</span></li>`).join('');
+  const promptHTML=d.prompt?`<div class="lab-prompt"><div class="lp-head"><span class="lp-label">📋 prompt to use</span><button class="lab-copy">COPY</button></div><div class="lp-body">${d.prompt.replace(/</g,'&lt;')}</div></div>`:'';
+  el.style.borderColor=acc.replace('var(--'+d.color+')','rgba(255,179,71,.4)');
+  el.innerHTML=`
+    <div class="lab-head">
+      <div>
+        <div class="lab-tag"><span class="hand">🖐️</span> Hands-on Lab ${id} / ${totalLabs}</div>
+        <h3>${d.title}</h3>
+        <p class="lab-sub">${d.sub}</p>
+      </div>
+      <div class="lab-progress"><div class="ring"><svg width="52" height="52"><circle class="ring-bg" cx="26" cy="26" r="22" fill="none" stroke-width="4"></circle><circle class="ring-fg" cx="26" cy="26" r="22" fill="none" stroke-width="4" stroke-dasharray="138.2" stroke-dashoffset="138.2"></circle></svg><div class="ring-txt">0/${d.steps.length}</div></div></div>
+    </div>
+    <div class="lab-meta">${metaHTML}</div>
+    <div class="lab-launch">${launchHTML}</div>
+    ${promptHTML}
+    <ul class="lab-steps">${stepsHTML}</ul>
+    <div class="lab-done-banner">🎉 ${d.done}</div>`;
+  // wire copy
+  const copyBtn=el.querySelector('.lab-copy');
+  if(copyBtn){ copyBtn.addEventListener('click',()=>{ navigator.clipboard.writeText(d.prompt).then(()=>{ copyBtn.textContent='✓ COPIED'; copyBtn.classList.add('copied'); setTimeout(()=>{copyBtn.textContent='COPY';copyBtn.classList.remove('copied');},1600); }).catch(()=>{ copyBtn.textContent='✓ COPIED'; copyBtn.classList.add('copied'); setTimeout(()=>{copyBtn.textContent='COPY';copyBtn.classList.remove('copied');},1600); }); }); }
+  // wire steps + progress
+  const steps=[...el.querySelectorAll('.lab-step')];
+  const ring=el.querySelector('.lab-progress');
+  const ringFg=el.querySelector('.ring-fg');
+  const ringTxt=el.querySelector('.ring-txt');
+  const banner=el.querySelector('.lab-done-banner');
+  const circ=138.2;
+  function update(){
+    const done=steps.filter(s=>s.classList.contains('done')).length;
+    ringFg.style.strokeDashoffset=circ*(1-done/steps.length);
+    ringTxt.textContent=done+'/'+steps.length;
+    ring.classList.toggle('done',done===steps.length);
+    banner.classList.toggle('show',done===steps.length);
+  }
+  steps.forEach(s=>s.addEventListener('click',()=>{ s.classList.toggle('done'); update(); }));
+}
+document.querySelectorAll('.lab[data-lab]').forEach(renderLab);
+
+/* ---- Hallucination spotter ---- */
+document.querySelectorAll('#halluOptions .pred-opt').forEach(opt=>{
+  opt.addEventListener('click',()=>{
+    const exp=document.getElementById('halluExplain'); exp.style.display='block';
+    const correct=opt.dataset.correct==='true';
+    document.querySelectorAll('#halluOptions .pred-opt').forEach(o=>o.style.opacity=0.5);
+    opt.style.opacity=1;
+    if(correct){ opt.style.borderColor='var(--lime)'; exp.style.color='var(--lime)'; exp.style.borderColor='rgba(190,242,100,.3)'; exp.style.background='rgba(190,242,100,.08)'; exp.textContent='✓ Correct. Einstein won the Nobel in 1921 (for the photoelectric effect), and he never invented the light bulb — that was Edison, decades earlier. Real names, real-sounding date, totally wrong facts. That blend of true and false is exactly how hallucinations slip past you.'; }
+    else{ opt.style.borderColor='var(--pink)'; exp.style.color='var(--pink)'; exp.style.borderColor='rgba(244,114,182,.3)'; exp.style.background='rgba(244,114,182,.08)'; exp.textContent='That one\'s actually true. Look again — which statement mixes up languages and invents a return type? (Hint: it\'s the code one.)'; }
+  });
+});
+
+/* ---- Prompt before/after cards ---- */
+const prompts=[
+  {tag:'1 · System prompt', vague:'"You are a helpful assistant. how do I reset my password?"\n\n(Rules and question jammed together — they fight each other.)', good:'SYSTEM: You are a support agent for HDFC retail banking.\nOnly answer retail-banking questions. Else, redirect politely.\n\nUSER: How do I reset my password?\n\n(Clean separation. Stable rules, swappable input.)'},
+  {tag:'2 · Be specific about format', vague:'"Summarize this article."\n\n(You get a paragraph. Whatever shape it feels like.)', good:'"Summarize in exactly 3 bullets.\nEach under 20 words. Neutral tone.\nReturn as a JSON array."\n\n(Now your code can actually parse it.)'},
+  {tag:'3 · Few-shot examples', vague:'"Classify the sentiment of this review."\n\n(The model guesses your label format.)', good:'"Classify sentiment. Examples:\n\'Broke in two days.\' → negative\n\'Decent for the price.\' → neutral\n\'Best buy this year!\' → positive\n\nNow: \'Works, but packaging was terrible.\'"'},
+  {tag:'4 · Chain of thought', vague:'"Cheapest way to send ₹1L from Pune to NYC?"\n\n(One giant ask — it picks without weighing options.)', good:'"Think step by step.\n1. List transfer methods.\n2. Fees + FX margin for each.\n3. Total cost for ₹1L.\n4. Recommend cheapest, reasoning first."'},
+];
+const promptCards=document.getElementById('promptCards');
+prompts.forEach((p,i)=>{
+  const card=document.createElement('div');
+  card.style.cssText='border:1px solid var(--line-2);border-radius:14px;overflow:hidden;background:rgba(0,0,0,.2)';
+  card.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+      <span style="font-family:'JetBrains Mono';font-size:12px;letter-spacing:.08em;color:var(--amber)">${p.tag}</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn ghost pv-vague" data-i="${i}" style="padding:6px 14px;font-size:12px">vague</button>
+        <button class="btn pv-good" data-i="${i}" style="padding:6px 14px;font-size:12px">engineered</button>
+      </div>
+    </div>
+    <pre id="pc-${i}" style="margin:0;padding:18px;font-family:'JetBrains Mono';font-size:12.5px;line-height:1.6;color:var(--lime);white-space:pre-wrap;background:rgba(190,242,100,.05);transition:opacity .2s ease">${p.good}</pre>`;
+  promptCards.appendChild(card);
+});
+promptCards.addEventListener('click',e=>{
+  const vb=e.target.closest('.pv-vague'), gb=e.target.closest('.pv-good');
+  if(!vb&&!gb) return;
+  const i=(vb||gb).dataset.i; const pre=document.getElementById('pc-'+i);
+  pre.style.opacity=0;
+  setTimeout(()=>{
+    if(vb){ pre.textContent=prompts[i].vague; pre.style.color='var(--soft)'; pre.style.background='rgba(255,255,255,.03)'; }
+    else{ pre.textContent=prompts[i].good; pre.style.color='var(--lime)'; pre.style.background='rgba(190,242,100,.05)'; }
+    pre.style.opacity=1;
+  },180);
+});
+
+/* ---- Embeddings solve button ---- */
+let vecSolved=false;
+document.getElementById('vecBtn').addEventListener('click',()=>{
+  const btn=document.getElementById('vecBtn');
+  if(!vecSolved){
+    document.getElementById('vecEq').style.display='none';
+    document.getElementById('vecQueen').classList.add('show');
+    revealQueen();
+    btn.textContent='Reset';
+    vecSolved=true;
+  }else{
+    document.getElementById('vecEq').style.display='inline';
+    document.getElementById('vecQueen').classList.remove('show');
+    const q=vSprites.find((s,i)=>vWords[i].t==='Queen'); if(q){q.mesh.visible=false;q.halo.visible=false;q.lbl.visible=false;}
+    btn.textContent='Solve the equation →';
+    vecSolved=false;
+  }
+});
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+window.addEventListener('load',()=>{
+  initBG();
+  initVec();
+  initTF3D();
+  if(!webglOK){
+    // graceful fallback: dark gradient already on body; just hide canvas
+    document.getElementById('bg-canvas').style.display='none';
+    document.body.style.background='radial-gradient(circle at 30% 20%,#13162a,#06070d 60%)';
+  }
+  setTimeout(()=>document.getElementById('loader').classList.add('done'), 900);
+});
+</script>
+</body>
+</html>
